@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "strict": true
+  },
+  "imports": {
+    "@digitalvirgo/su-bolt-core": "npm:@digitalvirgo/su-bolt-core@^2.1.0"
+  }
+}

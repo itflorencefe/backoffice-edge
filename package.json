@@ -1,0 +1,14 @@
+{
+  "name": "backoffice-edge",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Shared supabase/ (edge functions, migrations, seeds, tests) for the back office repos.",
+  "scripts": {
+    "test": "deno test --config supabase/tests/deno.json --allow-env --allow-read supabase/tests",
+    "check:migrations": "node scripts/check-migrations.mjs",
+    "sync": "node scripts/sync-consumer.mjs",
+    "test:sync": "node --test scripts/*.test.mjs",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
+  }
+}

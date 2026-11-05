@@ -1,0 +1,136 @@
+name: Preview on consumers
+
+# On every pull request: applies the change to each repo of consumers.json (locally, nothing is
+# pushed), runs that repo's tests and posts one comment with the result per repo.
+# Needs the edge-sync GitHub App: vars.EDGE_SYNC_APP_ID, secrets.EDGE_SYNC_APP_PRIVATE_KEY.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  consumers:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: matrix
+        run: node .github/scripts/consumers-matrix.mjs >> "$GITHUB_OUTPUT"
+
+  preview:
+    name: ${{ matrix.repo }}
+    needs: consumers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.consumers.outputs.matrix) }}
+    steps:
+      - id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.EDGE_SYNC_APP_ID }}
+          private-key: ${{ secrets.EDGE_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+          repositories: ${{ matrix.name }}
+
+      - uses: actions/checkout@v7
+        with:
+          path: edge
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.branch }}
+          token: ${{ steps.token.outputs.token }}
+          path: consumer
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Apply this change to the consumer
+        run: >
+          node edge/scripts/sync-consumer.mjs --target consumer
+          --exclude "${{ matrix.exclude }}" --summary summary.json
+          --version "preview-pr-${{ github.event.pull_request.number }}" --commit "${{ github.event.pull_request.head.sha }}"
+
+      - name: Consumer tests
+        id: tests
+        continue-on-error: true
+        working-directory: consumer
+        run: deno test --config supabase/tests/deno.json --allow-env --allow-read supabase/tests
+
+      - name: Save result
+        if: always()
+        run: |
+          node -e '
+            const fs = require("fs");
+            const summary = JSON.parse(fs.readFileSync("summary.json", "utf-8"));
+            fs.writeFileSync("result.json", JSON.stringify({ repo: process.env.REPO, branch: process.env.BRANCH, tests: process.env.OUTCOME, summary }));
+          '
+        env:
+          REPO: ${{ matrix.repo }}
+          BRANCH: ${{ matrix.branch }}
+          OUTCOME: ${{ steps.tests.outcome }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-${{ matrix.artifact }}
+          path: result.json
+
+      - name: Fail when the consumer tests fail
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "::error::Tests of ${{ matrix.repo }} fail with this change."
+          exit 1
+
+  report:
+    needs: preview
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: results
+
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const marker = '<!-- edge-preview -->';
+            const rows = [];
+            for (const dir of fs.existsSync('results') ? fs.readdirSync('results') : []) {
+              const r = JSON.parse(fs.readFileSync(path.join('results', dir, 'result.json'), 'utf-8'));
+              const s = r.summary;
+              const icon = r.tests === 'success' ? '✅' : '❌';
+              const drift = s.drifted.length ? `⚠️ ${s.drifted.length}` : '0';
+              rows.push(`| \`${r.repo}\` (${r.branch}) | ${icon} ${r.tests} | ${s.added.length} | ${s.updated.length} | ${s.removed.length} | ${drift} |`);
+            }
+            const body = [
+              marker,
+              '### Effect on registered repos',
+              '',
+              '| Repo | Tests | Added | Updated | Removed | Local edits replaced |',
+              '|---|---|---|---|---|---|',
+              ...(rows.length ? rows : ['| _no result_ | | | | | |']),
+              '',
+              'Nothing was pushed: after the merge, `Propagate to consumers` opens one PR per repo.',
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const mine = comments.find((c) => c.body?.includes(marker));
+            if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });

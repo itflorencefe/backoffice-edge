@@ -1,0 +1,17 @@
+#!/bin/sh
+# Runs the edge function and sync script tests before every commit.
+# Skip once with: git commit --no-verify
+
+if ! command -v deno >/dev/null 2>&1; then
+  echo "pre-commit: Deno is not installed, so the edge function tests cannot run."
+  echo "  Install it: curl -fsSL https://deno.land/install.sh | sh"
+  echo "  Or skip this check once: git commit --no-verify"
+  exit 1
+fi
+
+echo "pre-commit: running tests..."
+if ! npm run --silent test || ! npm run --silent test:sync; then
+  echo ""
+  echo "pre-commit: tests failed, commit aborted. Fix them, or skip once with: git commit --no-verify"
+  exit 1
+fi

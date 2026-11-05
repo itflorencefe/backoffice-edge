@@ -1,0 +1,10 @@
+node_modules
+.DS_Store
+*.log
+
+# Per-repo secrets and CLI state: never versioned here, never synced to consumers
+.npmrc
+**/.npmrc
+.env
+.env.*
+supabase/.temp

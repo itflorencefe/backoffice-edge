@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "strict": true
+  },
+  "imports": {
+    "@digitalvirgo/galaxy-pulsar-sdk": "npm:@digitalvirgo/galaxy-pulsar-sdk@1.2.7"
+  }
+}

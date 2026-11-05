@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "strict": true
+  },
+  "imports": {
+    "@digitalvirgo/atom-api": "npm:@digitalvirgo/atom-api@1.25.0"
+  }
+}

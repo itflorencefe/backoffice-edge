@@ -1,0 +1,127 @@
+name: Propagate to consumers
+
+# After a merge on main: opens (or updates) one pull request per repo of consumers.json, on the
+# branch "edge-sync", with the new supabase/ files. Each repo's own required checks run on that PR.
+# Run it by hand to (re)sync every repo, or only one with the "repo" input.
+# Needs the edge-sync GitHub App: vars.EDGE_SYNC_APP_ID, secrets.EDGE_SYNC_APP_PRIVATE_KEY.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - "consumers.json"
+      - "scripts/sync-consumer.mjs"
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "Only this consumer (owner/name). Empty: every registered repo."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: propagate
+  cancel-in-progress: false
+
+jobs:
+  consumers:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: matrix
+        run: node .github/scripts/consumers-matrix.mjs "${{ inputs.repo }}" >> "$GITHUB_OUTPUT"
+
+  propagate:
+    name: ${{ matrix.repo }}
+    needs: consumers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.consumers.outputs.matrix) }}
+    steps:
+      - id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.EDGE_SYNC_APP_ID }}
+          private-key: ${{ secrets.EDGE_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+          repositories: ${{ matrix.name }}
+
+      - uses: actions/checkout@v7
+        with:
+          path: edge
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.branch }}
+          token: ${{ steps.token.outputs.token }}
+          path: consumer
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Sync supabase/
+        id: sync
+        run: |
+          VERSION=$(node -p "require('./edge/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          node edge/scripts/sync-consumer.mjs --target consumer \
+            --exclude "${{ matrix.exclude }}" --summary summary.json \
+            --version "$VERSION" --commit "$GITHUB_SHA"
+
+      - name: Consumer tests
+        id: tests
+        continue-on-error: true
+        working-directory: consumer
+        run: deno test --config supabase/tests/deno.json --allow-env --allow-read supabase/tests
+
+      - name: Pull request body
+        run: |
+          node -e '
+            const fs = require("fs");
+            const s = JSON.parse(fs.readFileSync("summary.json", "utf-8"));
+            const list = (title, items) => items.length ? `\n**${title}**\n${items.map((f) => "- `" + f + "`").join("\n")}\n` : "";
+            const body = [
+              `Automatic update from [backoffice-edge](${process.env.SOURCE_URL}) **${process.env.VERSION}** (${process.env.SHORT}).`,
+              "",
+              `| Added | Updated | Removed | Unchanged |`,
+              `|---|---|---|---|`,
+              `| ${s.added.length} | ${s.updated.length} | ${s.removed.length} | ${s.unchanged} |`,
+              "",
+              `Tests run by the sync job: **${process.env.OUTCOME}**. This repo\x27s required checks run on this PR as usual.`,
+              s.drifted.length ? "\n> [!WARNING]\n> Files edited in this repo are replaced. To keep a customization, add its path to `exclude` for this repo in backoffice-edge `consumers.json`." : "",
+              list("Local edits replaced", s.drifted),
+              list("Added", s.added),
+              list("Updated", s.updated),
+              list("Removed", s.removed),
+              s.excluded.length ? `\nNot synced (exclude): ${s.excluded.map((e) => "`" + e + "`").join(", ")}` : "",
+              "",
+              "After merging: deploy the backend (`npm run backend:deploy`) so new migrations and functions reach Supabase.",
+            ].join("\n");
+            fs.writeFileSync("pr-body.md", body);
+          '
+        env:
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          VERSION: ${{ steps.sync.outputs.version }}
+          SHORT: ${{ steps.sync.outputs.short }}
+          OUTCOME: ${{ steps.tests.outcome }}
+
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.token.outputs.token }}
+          path: consumer
+          base: ${{ matrix.branch }}
+          branch: edge-sync
+          delete-branch: true
+          commit-message: "chore(edge): sync supabase from backoffice-edge ${{ steps.sync.outputs.version }} (${{ steps.sync.outputs.short }})"
+          title: "chore(edge): backoffice-edge ${{ steps.sync.outputs.version }} (${{ steps.sync.outputs.short }})"
+          body-path: pr-body.md

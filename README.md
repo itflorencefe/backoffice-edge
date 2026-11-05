@@ -1,5 +1,65 @@
 # backoffice-edge
-# backoffice-edge
-# backoffice-edge
-# backoffice-edge
-# backoffice-edge
+
+Single source of the `supabase/` folder shared by the back office repos: edge functions, migrations, seeds, `config.toml` and the edge function tests. Change these files here, never in the repos that use them: every merge on `main` opens an update pull request in each registered repo.
+
+## How a change travels
+
+1. **Pull request here.**
+   - `Tests` runs the edge function tests, the sync script tests and the migrations rule. It is required to merge.
+   - `Preview on consumers` applies the change to each registered repo (locally, nothing is pushed) and runs that repo's tests. One comment on the PR lists the result per repo.
+2. **Merge on `main`.** `Propagate to consumers` opens or updates one PR per repo, on the branch `edge-sync`, titled `chore(edge): backoffice-edge <version> (<commit>)`.
+3. **Merge in each repo.** The repo's own required checks (its `Tests` workflow) run on that PR. Then deploy the backend there (`npm run backend:deploy`).
+
+A repo that falls behind keeps an open, red `edge-sync` PR.
+
+## What the sync owns in a repo
+
+| Path | Rule |
+|---|---|
+| `supabase/config.toml`, `supabase/functions/`, `supabase/seeds/`, `supabase/tests/` | Overwritten with this repo's files |
+| `supabase/migrations/` | New files are added; existing ones are never changed or deleted |
+| `.edge-sync.json` | Written by the sync: version, commit and a hash per synced file |
+
+Never touched: anything the repo has and this repo never shipped (its own functions, migrations), `supabase/tests/local/` (repo-only tests), `.npmrc`, `.env*`, `supabase/.temp/`, and the paths listed in the repo's `exclude`.
+
+A file edited in a repo is replaced at the next sync and listed as **Local edits replaced** in the PR. To keep a customization, add its path to `exclude`.
+
+## Register a repo
+
+1. Add it to [`consumers.json`](consumers.json) with a pull request here:
+   ```json
+   { "repo": "itflorencefe/my-backoffice", "branch": "main", "exclude": ["supabase/functions/pulsar"] }
+   ```
+2. Install the **edge-sync** GitHub App on that repo.
+3. Run **Actions → Propagate to consumers** with `repo` set to it, to open its first PR.
+
+New Bolt projects created from the starter template are new repos: register each one, or it stays on the version it was created from.
+
+## Rules for changes
+
+- **Migrations are append-only.** A database that applied a migration never runs it again, so put every schema change in a new file (`YYYYMMDDHHMMSS_name.sql`). `scripts/check-migrations.mjs` blocks PRs that modify, rename or delete a migration that is on `main`. The baseline is frozen.
+- **Tests come with the change.** Edge function tests live in `supabase/tests/` (see its README). Repo-specific tests go in `supabase/tests/local/` of that repo.
+- **No secrets in this repo.** `.npmrc` (private `@digitalvirgo` registry token) stays in each repo and is never synced.
+- Bump `version` in `package.json` for releases; it is shown in the PR title and in `.edge-sync.json`.
+
+## One-time setup
+
+1. Create a GitHub App (organization settings → Developer settings → GitHub Apps), named for example `edge-sync`:
+   - repository permissions: **Contents** read and write, **Pull requests** read and write, **Metadata** read;
+   - no webhook.
+2. Install it on this repo and on every consumer repo.
+3. In this repo, *Settings → Secrets and variables → Actions*:
+   - variable `EDGE_SYNC_APP_ID`: the App ID;
+   - secret `EDGE_SYNC_APP_PRIVATE_KEY`: a private key generated for the App.
+4. Protect `main` with the required check **Edge tests**.
+
+## Local commands
+
+```bash
+npm test                    # edge function tests (Deno)
+npm run test:sync           # sync script tests (Node)
+npm run check:migrations    # migrations rule against origin/main
+node scripts/sync-consumer.mjs --target ../starter-backoffice-template --dry-run   # what a sync would change
+```
+
+`npm install` enables the pre-commit hook (`.githooks/pre-commit`), which runs both test suites.

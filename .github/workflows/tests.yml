@@ -1,0 +1,43 @@
+name: Tests
+
+# Edge function tests, sync script tests and the append-only migrations rule.
+# "Edge tests" is the required status check of main.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  edge:
+    name: Edge tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+          cache: true
+          cache-hash: ${{ hashFiles('supabase/tests/deno.lock') }}
+
+      - name: Edge function tests
+        run: npm test
+
+      - name: Sync script tests
+        run: node --test scripts/*.test.mjs
+
+      - name: Released migrations are unchanged
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-migrations.mjs --base "origin/${{ github.base_ref }}"

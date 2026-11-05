@@ -1,0 +1,45 @@
+# Minimal Supabase config for `supabase db push`
+# Remote project ref is set via `supabase link`, not here.
+# Full reference: https://supabase.com/docs/guides/cli/config
+project_id = "bolt-migration"
+
+[db]
+major_version = 17
+
+[db.seed]
+enabled = true
+sql_paths = ['./seeds/*.sql']
+
+[db.pooler]
+enabled = false
+
+[functions.bolt-auth-proxy]
+verify_jwt = false
+
+[functions.static-env-proxy]
+verify_jwt = false
+
+[functions.whoami]
+verify_jwt = false
+
+[functions.gamification-proxy]
+verify_jwt = false
+
+[functions.pulsar]
+verify_jwt = false
+
+[functions.smart-journey]
+verify_jwt = false
+
+[functions.get-product-config]
+verify_jwt = false
+
+[functions.get-atom-legal-document]
+verify_jwt = false
+
+
+[functions.screen-layout]
+verify_jwt = false
+
+[functions.clone-product]
+verify_jwt = true

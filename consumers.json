@@ -1,0 +1,10 @@
+{
+  "$comment": "Repos that receive supabase/ from backoffice-edge. Add one with a PR, then install the edge-sync GitHub App on it. exclude: paths the repo customizes and the sync must not touch.",
+  "consumers": [
+    {
+      "repo": "itflorencefe/starter-backoffice-template",
+      "branch": "main",
+      "exclude": []
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "@shared/resolve-product": "../_shared/resolve-product.ts"
+  }
+}
