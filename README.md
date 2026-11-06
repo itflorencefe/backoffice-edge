@@ -44,7 +44,7 @@ New Bolt projects created from the starter template are new repos: register each
 
 ## One-time setup
 
-1. Create a GitHub App (organization settings → Developer settings → GitHub Apps), named for example `edge-sync`:
+1. Create a GitHub App from the `itflorencefe` account (personal account: *Settings → Developer settings → GitHub Apps → New GitHub App*, <https://github.com/settings/apps/new>), named for example `itflorencefe-edge-sync`:
    - repository permissions: **Contents** read and write, **Pull requests** read and write, **Metadata** read;
    - no webhook.
 2. Install it on this repo and on every consumer repo.
