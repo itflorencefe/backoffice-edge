@@ -222,14 +222,22 @@ Deno.serve(async (req)=>{
       error: newProdErr.message
     }, 500);
     // Clone login methods (product level, both environments): drop the defaults seeded by
-    // the product trigger first, so the clone mirrors the source exactly
-    const { data: loginMethods } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").select("environment, type, enabled, is_default, display_order, label_i18n_key, icon, allow_signup, signup_url, feature_flag, min_app_version, max_app_version, config, updated_by").eq("product_id", source_product_id);
-    if (loginMethods && loginMethods.length > 0) {
-      await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").delete().eq("product_id", newProduct.id);
-      await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").insert(loginMethods.map((m)=>({
-          ...m,
-          product_id: newProduct.id
-        })));
+    // the product trigger first, so the clone mirrors the source exactly. The defaults are
+    // removed only once the source rows were read; a failure keeps them and is logged.
+    const { data: loginMethods, error: loginReadErr } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").select("environment, type, enabled, is_default, display_order, label_i18n_key, icon, allow_signup, signup_url, feature_flag, min_app_version, max_app_version, config, updated_by").eq("product_id", source_product_id);
+    if (loginReadErr) {
+      console.error("[error] clone-product: login methods read failed", loginReadErr.message);
+    } else if (loginMethods && loginMethods.length > 0) {
+      const { error: loginDelErr } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").delete().eq("product_id", newProduct.id);
+      if (loginDelErr) {
+        console.error("[error] clone-product: clearing seeded login methods failed", loginDelErr.message);
+      } else {
+        const { error: loginWriteErr } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").insert(loginMethods.map((m)=>({
+            ...m,
+            product_id: newProduct.id
+          })));
+        if (loginWriteErr) console.error("[error] clone-product: login methods copy failed", loginWriteErr.message);
+      }
     }
     // URL & Behaviour rules of the product (locale rules are copied with each locale)
     await clonePageBehaviour(supabaseAdmin, "product_id", source_product_id, newProduct.id);
