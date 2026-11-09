@@ -273,12 +273,16 @@ Deno.serve(async (req: Request) => {
     const serviceSlug = url.searchParams.get("slug");
     const countryCode = url.searchParams.get("country_code");
     const domain = url.searchParams.get("domain");
+    const bundleId = url.searchParams.get("bundle_id")?.trim() || null;
     const languageCode = url.searchParams.get("language_code");
     const environment = url.searchParams.get("environment") || "production";
     const showDict = url.searchParams.get("show-dict") === "1";
 
-    if (!domain && (!serviceSlug || !countryCode)) {
-      return jsonResponse({ ok: false, error: "Either 'domain' or both 'slug' and 'country_code' are required" }, 400);
+    if (!domain && !bundleId && (!serviceSlug || !countryCode)) {
+      return jsonResponse({
+        ok: false,
+        error: "Either 'domain', 'bundle_id', or both 'slug' and 'country_code' are required",
+      }, 400);
     }
 
     if (environment !== "staging" && environment !== "production") {
@@ -299,6 +303,7 @@ Deno.serve(async (req: Request) => {
     try {
       resolved = await resolveProduct(supabase, {
         domain: cleanDomain ?? undefined,
+        bundle_id: bundleId ?? undefined,
         country_code: countryCode ?? undefined,
         service_slug: serviceSlug ?? undefined,
         environment: environment as "staging" | "production",

@@ -109,3 +109,57 @@ Deno.test("clone-product: copies product data, locales, login methods, rules and
     assertEquals(texts.map((t) => [t.namespace, t.key, t.value]), [["frTestHomeScreen", "title", "Ciao"]]);
   });
 });
+
+Deno.test("clone-product: login method failures never drop the seeded defaults blindly and do not fail the clone", async () => {
+  const LM = "/rest/v1/bo_product_login_methods";
+  const seedSource = (fake: FakeSupabase) => {
+    seedEditor(fake, "admin");
+    fake.seed("backoffice.bo_products", [
+      { id: "src", service_id: "svc", slug: "it-test", display_name: "Test IT", country_code: "IT", native_bundle_id: null, timezone: null },
+    ]);
+    fake.seed("backoffice.bo_product_login_methods", [
+      { id: "lm1", product_id: "src", environment: "staging", type: "google", enabled: true, is_default: false, display_order: 10, config: {} },
+    ]);
+  };
+  const lmCalls = (fake: FakeSupabase) => fake.requests.filter((r) => r.path === LM).map((r) => r.method);
+  const errors: unknown[][] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => errors.push(args);
+  try {
+    // Source rows cannot be read: nothing is deleted or written.
+    await withFake(async (fake) => {
+      seedSource(fake);
+      fake.fail("backoffice.bo_product_login_methods", "GET");
+      const res = await handler(post("clone-product", body, auth));
+      assertEquals(res.status, 200);
+      await res.body?.cancel();
+      assertEquals(lmCalls(fake), ["GET"]);
+    });
+    // The seeded defaults cannot be removed: the copy is skipped instead of duplicating rows.
+    await withFake(async (fake) => {
+      seedSource(fake);
+      fake.fail("backoffice.bo_product_login_methods", "DELETE");
+      const res = await handler(post("clone-product", body, auth));
+      assertEquals(res.status, 200);
+      await res.body?.cancel();
+      assertEquals(lmCalls(fake), ["GET", "DELETE"]);
+    });
+    // The copy itself fails: the clone still completes.
+    await withFake(async (fake) => {
+      seedSource(fake);
+      fake.fail("backoffice.bo_product_login_methods", "POST");
+      const res = await handler(post("clone-product", body, auth));
+      assertEquals(res.status, 200);
+      assertEquals((await readJson(res)).ok, true);
+      assertEquals(lmCalls(fake), ["GET", "DELETE", "POST"]);
+    });
+  } finally {
+    console.error = realError;
+  }
+  const logged = errors.map((e) => String(e[0]));
+  assertEquals(logged.filter((m) => m.startsWith("[error] clone-product: ")), [
+    "[error] clone-product: login methods read failed",
+    "[error] clone-product: clearing seeded login methods failed",
+    "[error] clone-product: login methods copy failed",
+  ]);
+});

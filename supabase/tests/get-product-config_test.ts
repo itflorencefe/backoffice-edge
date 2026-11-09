@@ -73,6 +73,33 @@ Deno.test("get-product-config: resolves by slug+country, by domain and falls bac
   });
 });
 
+Deno.test("get-product-config: resolves by bundle_id (with country, or the default product of the bundle)", async () => {
+  await withFake(async (fake) => {
+    seedProduct(fake);
+    for (const p of fake.rows("backoffice.bo_products")) p.native_bundle_id = "com.test.app";
+
+    const withCountry = await call({ bundle_id: "com.test.app", country_code: "it", environment: "production" });
+    assertEquals(withCountry.status, 200);
+    assertEquals(withCountry.body.detected_by, "bundle_id+country");
+    assertEquals((withCountry.body.product as Row).id, PRODUCT);
+
+    const bundleOnly = await call({ bundle_id: " com.test.app ", environment: "production" });
+    assertEquals(bundleOnly.status, 200);
+    assertEquals(bundleOnly.body.detected_by, "bundle_id+default");
+    assertEquals((bundleOnly.body.product as Row).id, "prod-fr");
+
+    const unknownCountry = await call({ bundle_id: "com.test.app", country_code: "es", environment: "production" });
+    assertEquals(unknownCountry.body.detected_by, "bundle_id+default");
+
+    const unknownBundle = await call({ bundle_id: "com.other.app", environment: "production" });
+    assertEquals(unknownBundle.status, 404);
+
+    const blank = await call({ bundle_id: "  ", environment: "production" });
+    assertEquals(blank.status, 400);
+    assertMatch(String(blank.body.error), /'bundle_id'/);
+  });
+});
+
 Deno.test("get-product-config: language resolution and locale codes", async () => {
   await withFake(async (fake) => {
     seedProduct(fake);
