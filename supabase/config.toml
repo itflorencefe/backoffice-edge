@@ -43,3 +43,6 @@ verify_jwt = false
 
 [functions.clone-product]
 verify_jwt = true
+
+[functions.dvlive]
+verify_jwt = false

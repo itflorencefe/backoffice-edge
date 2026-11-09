@@ -29,6 +29,44 @@ async function importKey(): Promise<CryptoKey> {
   );
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function claimString(
+  payload: Record<string, unknown>,
+  meta: Record<string, unknown>,
+  key: string,
+): string {
+  const top = payload[key];
+  if (typeof top === "string" && top) return top;
+  const nested = meta[key];
+  return typeof nested === "string" ? nested : "";
+}
+
+/** Normalize flat production JWTs and local session tokens that nest claims in app_metadata. */
+export function normalizeAppClaims(raw: Record<string, unknown>): AppClaims | null {
+  const meta = asRecord(raw.app_metadata);
+  const sub = claimString(raw, meta, "sub") || (typeof raw.sub === "string" ? raw.sub : "");
+  const app_role = claimString(raw, meta, "app_role");
+  if (!sub || app_role !== "app_user") return null;
+
+  return {
+    sub,
+    service_id: claimString(raw, meta, "service_id"),
+    service_slug: claimString(raw, meta, "service_slug"),
+    product_id: claimString(raw, meta, "product_id"),
+    product_slug: claimString(raw, meta, "product_slug"),
+    app_role,
+    absolute_reference: claimString(raw, meta, "absolute_reference"),
+    role: claimString(raw, meta, "role") || "authenticated",
+    iat: typeof raw.iat === "number" ? raw.iat : 0,
+    exp: typeof raw.exp === "number" ? raw.exp : 0,
+  };
+}
+
 export async function verifyAppJwt(req: Request): Promise<VerifyResult> {
   const auth = req.headers.get("Authorization") ?? "";
   if (!auth.toLowerCase().startsWith("bearer ")) {
@@ -37,11 +75,12 @@ export async function verifyAppJwt(req: Request): Promise<VerifyResult> {
   const rawToken = auth.slice(7).trim();
   try {
     const key = await importKey();
-    const payload = await jwtVerify(rawToken, key) as unknown as AppClaims;
-    if (payload.app_role !== "app_user") {
+    const payload = await jwtVerify(rawToken, key) as unknown as Record<string, unknown>;
+    const claims = normalizeAppClaims(payload);
+    if (!claims) {
       return { ok: false, status: 403, message: "Not an app_user token" };
     }
-    return { ok: true, claims: payload, rawToken };
+    return { ok: true, claims, rawToken };
   } catch (err) {
     return { ok: false, status: 401, message: err instanceof Error ? err.message : "Invalid token" };
   }

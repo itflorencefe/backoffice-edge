@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "strict": true
+  },
+  "imports": {
+    "@digitalvirgo/dvlive-api": "../_shared/dvlive-sdk/index.ts"
+  }
+}
