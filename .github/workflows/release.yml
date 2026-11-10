@@ -1,0 +1,139 @@
+name: Release
+
+# Git flow: feature branches → pull requests on develop → this workflow (run by hand).
+#   1. Fast-forwards main to develop (main never gets other commits, so it always matches develop).
+#   2. semantic-release on main: version from the Conventional Commits since the last tag,
+#      package.json + CHANGELOG.md committed on main, tag (e.g. 1.2.0), GitHub release.
+#   3. Fast-forwards develop to main, so the release commit is on both branches.
+#   4. Starts "Propagate to consumers" on main: one update PR per registered repo with this version.
+# Git operations and the GitHub release use the edge-sync GitHub App token (vars.EDGE_SYNC_APP_ID,
+# secrets.EDGE_SYNC_APP_PRIVATE_KEY): the App is the only bypass actor of the main / develop rulesets.
+# The App needs Contents and Issues read/write (semantic-release comments the released issues / PRs).
+# Optional vars.RELEASE_ACTORS: comma-separated GitHub logins allowed to run it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "release" to merge develop into main and publish a version'
+        required: true
+        default: ""
+      propagate:
+        description: "Open the update PRs in the registered repos after the release"
+        type: boolean
+        default: true
+
+# GITHUB_TOKEN only reads the repo and starts Propagate; writes use the App token.
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Authorize
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          ACTORS: ${{ vars.RELEASE_ACTORS }}
+        run: |
+          if [ "$CONFIRM" != "release" ]; then
+            echo "::error::Confirmation missing: type \"release\"."; exit 1
+          fi
+          if [ -n "$ACTORS" ] && ! echo ",${ACTORS// /}," | grep -qi ",${GITHUB_ACTOR},"; then
+            echo "::error::${GITHUB_ACTOR} is not in RELEASE_ACTORS."; exit 1
+          fi
+
+      - id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.EDGE_SYNC_APP_ID }}
+          private-key: ${{ secrets.EDGE_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.token.outputs.token }}
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Fast-forward main to develop
+        id: merge
+        run: |
+          git fetch origin develop
+          if [ -z "$(git log --oneline main..origin/develop)" ]; then
+            echo "Nothing to release: main already contains develop." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "released=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if ! git merge --ff-only origin/develop; then
+            echo "::error::main has commits that are not on develop: merge main into develop first."; exit 1
+          fi
+          {
+            echo "### Merged into main"
+            echo '```'
+            git log --oneline ORIG_HEAD..HEAD
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "released=true" >> "$GITHUB_OUTPUT"
+
+      # Same checks as the pull requests, on exactly what is about to be released.
+      - name: Tests
+        if: steps.merge.outputs.released == 'true'
+        run: |
+          npm test
+          node --test scripts/*.test.mjs
+
+      - name: Push main
+        if: steps.merge.outputs.released == 'true'
+        run: git push origin main
+
+      - name: Semantic release
+        if: steps.merge.outputs.released == 'true'
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v6
+        with:
+          semantic_version: 25
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+            conventional-changelog-conventionalcommits@^9
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+
+      - name: Fast-forward develop to main
+        if: steps.merge.outputs.released == 'true'
+        run: |
+          git fetch origin main develop
+          if ! git merge-base --is-ancestor origin/develop origin/main; then
+            echo "::warning::develop moved during the release: merge main into develop with a pull request."
+            exit 0
+          fi
+          git push origin origin/main:develop
+
+      - name: Summary
+        if: steps.merge.outputs.released == 'true'
+        run: |
+          if [ "${{ steps.semantic.outputs.new_release_published }}" = "true" ]; then
+            echo "Released **${{ steps.semantic.outputs.new_release_git_tag }}**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No release-worthy commit (feat / fix / chore / docs / ...): main updated, no new version." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Dispatched with GITHUB_TOKEN (actions: write); the App has no Actions permission.
+      - name: Propagate to consumers
+        if: steps.merge.outputs.released == 'true' && inputs.propagate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run propagate.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo "Started **Propagate to consumers** on main." >> "$GITHUB_STEP_SUMMARY"

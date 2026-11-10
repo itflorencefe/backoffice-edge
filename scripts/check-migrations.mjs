@@ -4,13 +4,13 @@
  * Migrations are append-only: databases that applied a file never run it again, so a change to it
  * would never reach them. Put every schema change in a new file instead.
  *
- *   node scripts/check-migrations.mjs [--base <git ref>]   (default: origin/main)
+ *   node scripts/check-migrations.mjs [--base <git ref>]   (default: origin/develop)
  */
 
 import { execFileSync } from 'node:child_process';
 
 const i = process.argv.indexOf('--base');
-const base = i >= 0 ? process.argv[i + 1] : 'origin/main';
+const base = i >= 0 ? process.argv[i + 1] : 'origin/develop';
 
 let out = '';
 try {

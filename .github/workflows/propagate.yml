@@ -1,17 +1,12 @@
 name: Propagate to consumers
 
-# After a merge on main: opens (or updates) one pull request per repo of consumers.json, on the
-# branch "edge-sync", with the new supabase/ files. Each repo's own required checks run on that PR.
-# Run it by hand to (re)sync every repo, or only one with the "repo" input.
+# Started by the Release workflow once a version is published on main: opens (or updates) one pull
+# request per repo of consumers.json, on the branch "edge-sync", with the supabase/ files of main.
+# Each repo's own required checks run on that PR.
+# Run it by hand (on main) to (re)sync every repo, or only one with the "repo" input.
 # Needs the edge-sync GitHub App: vars.EDGE_SYNC_APP_ID, secrets.EDGE_SYNC_APP_PRIVATE_KEY.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "supabase/**"
-      - "consumers.json"
-      - "scripts/sync-consumer.mjs"
   workflow_dispatch:
     inputs:
       repo:
@@ -28,6 +23,8 @@ concurrency:
 
 jobs:
   consumers:
+    # Consumers only receive released code.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}

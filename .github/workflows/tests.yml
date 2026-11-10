@@ -1,12 +1,12 @@
 name: Tests
 
 # Edge function tests, sync script tests and the append-only migrations rule.
-# "Edge tests" is the required status check of main.
+# "Edge tests" is the required status check of develop (pull requests) and main.
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [develop, main]
   workflow_dispatch: {}
 
 permissions:
@@ -22,6 +22,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Pull requests target develop
+        if: github.event_name == 'pull_request' && github.base_ref != 'develop'
+        run: |
+          echo "::error::Open the pull request on develop. main is updated only by Actions → Release."
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
