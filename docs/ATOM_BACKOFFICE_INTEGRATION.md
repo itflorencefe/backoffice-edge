@@ -46,7 +46,15 @@ if (!data || data.ok !== true) {
 
 Use the backoffice's operator session for authenticated Supabase requests. The `checkLocalPacks` database read forwards the incoming Authorization header and uses caller RLS permissions.
 
-Access control: `product`, `packs`, `checkLocalPacks` and `skus` require the JWT of a backoffice user (viewer or above, checked with `public.is_backoffice_role`); without it they answer `403` with `{ "ok": false, "error": "Backoffice access required" }`. `discover` and `documents` stay public, like the legacy `get-atom-legal-document`.
+Access control: **every mode** (`discover`, `documents`, `product`, `packs`, `checkLocalPacks`, `skus`) requires the operator session of an active backoffice user (viewer, editor or admin), checked before the body is read:
+
+| Case | Status | `error` |
+|---|---|---|
+| No `Authorization: Bearer <jwt>` / token not valid for Supabase Auth | `401` | `Unauthorized` |
+| App user token (`app_role = app_user`) | `403` | `App users are not authorized for this endpoint` |
+| Signed in, no active `backoffice.bo_backoffice_users` row with viewer / editor / admin | `403` | `Insufficient permissions` |
+
+Apps do not call `atom`: they read packs through `get-product-packs` and published documents (Atom ones included) through `get-product-document`.
 
 Atom credentials belong on the server. The browser does not log in to Atom or receive those credentials.
 
