@@ -126,7 +126,7 @@ jobs:
               '|---|---|---|---|---|---|',
               ...(rows.length ? rows : ['| _no result_ | | | | | |']),
               '',
-              'Nothing was pushed: after the merge, `Propagate to consumers` opens one PR per repo.',
+              'Nothing was pushed: the next release (Actions → Release) opens one PR per repo.',
             ].join('\n');
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
