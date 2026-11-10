@@ -21,6 +21,8 @@ Run the working tree on a local Supabase stack and use it from the starter befor
    - fast-forwards `main` to `develop` and runs the tests on it;
    - runs semantic-release on `main`: version from the commits since the last tag, `package.json` and
      `CHANGELOG.md` committed (`chore(release): <version> [skip release]`), tag `<version>`, GitHub release;
+     it runs even when `develop` brings nothing new, so commits already on `main` and not tagged yet are released
+     (the first run tags `1.0.0`);
    - fast-forwards `develop` to `main`, so both have the release commit;
    - starts `Propagate to consumers`, which opens or updates one PR per repo, on the branch `edge-sync`, titled
      `chore(edge): backoffice-edge <version> (<commit>)`.

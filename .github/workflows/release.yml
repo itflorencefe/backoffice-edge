@@ -72,8 +72,9 @@ jobs:
         run: |
           git fetch origin develop
           if [ -z "$(git log --oneline main..origin/develop)" ]; then
-            echo "Nothing to release: main already contains develop." | tee -a "$GITHUB_STEP_SUMMARY"
-            echo "released=false" >> "$GITHUB_OUTPUT"; exit 0
+            # Nothing new from develop: semantic-release still releases commits of main not tagged yet.
+            echo "main already contains develop: releasing what main has since the last tag." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "merged=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if ! git merge --ff-only origin/develop; then
             echo "::error::main has commits that are not on develop: merge main into develop first."; exit 1
@@ -84,21 +85,20 @@ jobs:
             git log --oneline ORIG_HEAD..HEAD
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "merged=true" >> "$GITHUB_OUTPUT"
 
       # Same checks as the pull requests, on exactly what is about to be released.
       - name: Tests
-        if: steps.merge.outputs.released == 'true'
         run: |
           npm test
           node --test scripts/*.test.mjs
 
       - name: Push main
-        if: steps.merge.outputs.released == 'true'
+        if: steps.merge.outputs.merged == 'true'
         run: git push origin main
 
+      # Releases the Conventional Commits since the last tag (all of history for the first one: 1.0.0).
       - name: Semantic release
-        if: steps.merge.outputs.released == 'true'
         id: semantic
         uses: cycjimmy/semantic-release-action@v6
         with:
@@ -111,7 +111,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
 
       - name: Fast-forward develop to main
-        if: steps.merge.outputs.released == 'true'
+        if: steps.merge.outputs.merged == 'true' || steps.semantic.outputs.new_release_published == 'true'
         run: |
           git fetch origin main develop
           if ! git merge-base --is-ancestor origin/develop origin/main; then
@@ -121,17 +121,18 @@ jobs:
           git push origin origin/main:develop
 
       - name: Summary
-        if: steps.merge.outputs.released == 'true'
         run: |
           if [ "${{ steps.semantic.outputs.new_release_published }}" = "true" ]; then
             echo "Released **${{ steps.semantic.outputs.new_release_git_tag }}**" >> "$GITHUB_STEP_SUMMARY"
-          else
+          elif [ "${{ steps.merge.outputs.merged }}" = "true" ]; then
             echo "No release-worthy commit (feat / fix / chore / docs / ...): main updated, no new version." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Nothing to release: no new commit on develop and none untagged on main." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # Dispatched with GITHUB_TOKEN (actions: write); the App has no Actions permission.
       - name: Propagate to consumers
-        if: steps.merge.outputs.released == 'true' && inputs.propagate
+        if: inputs.propagate && (steps.merge.outputs.merged == 'true' || steps.semantic.outputs.new_release_published == 'true')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
