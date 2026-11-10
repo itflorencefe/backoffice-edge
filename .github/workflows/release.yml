@@ -97,18 +97,30 @@ jobs:
         if: steps.merge.outputs.merged == 'true'
         run: git push origin main
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       # Releases the Conventional Commits since the last tag (all of history for the first one: 1.0.0).
+      # The run belongs to the branch it was started from (develop, the default branch), and
+      # semantic-release reads the branch from GITHUB_REF: it is set to main here, where the commit is.
+      # (A step `env:` cannot override GITHUB_* variables, hence the shell assignment.)
       - name: Semantic release
         id: semantic
-        uses: cycjimmy/semantic-release-action@v6
-        with:
-          semantic_version: 25
-          extra_plugins: |
-            @semantic-release/changelog
-            @semantic-release/git
-            conventional-changelog-conventionalcommits@^9
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          npm install --no-save --no-package-lock --no-audit --no-fund \
+            semantic-release@25 @semantic-release/changelog@6 @semantic-release/git@10 \
+            conventional-changelog-conventionalcommits@9
+          GITHUB_REF=refs/heads/main GITHUB_REF_NAME=main npx --no-install semantic-release
+          TAG=$(git tag --points-at HEAD | head -n1)
+          if [ -n "$TAG" ]; then
+            echo "new_release_published=true" >> "$GITHUB_OUTPUT"
+            echo "new_release_git_tag=$TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_release_published=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Fast-forward develop to main
         if: steps.merge.outputs.merged == 'true' || steps.semantic.outputs.new_release_published == 'true'
