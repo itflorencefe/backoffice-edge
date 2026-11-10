@@ -103,6 +103,12 @@ function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
+/** Optional challenge reference of a section (config.challenge_id), always as a string. */
+function challengeId(v: unknown): string | null {
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return str(v) || null;
+}
+
 function validExternal(url: string): boolean {
   return EXTERNAL_URL_RE.test(url);
 }
@@ -322,6 +328,7 @@ function serializeSections(sections: SectionRow[], translate: Translate): Record
       start_at: toMinute(s.start_at_local),
       end_at: toMinute(s.end_at_local),
       visible_to: visibleTo(s.visible_to),
+      challenge_id: challengeId(s.config?.challenge_id),
       ...widgetFields(s.widget_type, config),
     };
   });

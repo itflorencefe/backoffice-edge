@@ -338,12 +338,12 @@ Deno.test("screen-layout: full section output per widget type", async () => {
     fake.seed("backoffice.bo_app_screen_sections", [
       section("w-text", "s-home", {
         position: 0,
-        config: { label: "Info", description: "Watch and earn", link: { type: "internal", url: "rewards/list" } },
+        config: { label: "Info", description: "Watch and earn", link: { type: "internal", url: "rewards/list" }, challenge_id: 42 },
         visible_to: ["premium", "guest"],
       }),
       section("w-banner", "s-home", {
         widget_type: "banner", position: 1, col_span: 6, title: "Summer promo",
-        config: { label: "Banner", description: "", image_source: "upload", image_url: `${STORAGE}/banner.png`, link: { type: "external", url: "https://example.com/promo" } },
+        config: { challenge_id: " ch-7 ", label: "Banner", description: "", image_source: "upload", image_url: `${STORAGE}/banner.png`, link: { type: "external", url: "https://example.com/promo" } },
       }),
       section("w-video", "s-home", {
         widget_type: "video", position: 2, col_span: 6, title: "How it works",
@@ -371,23 +371,23 @@ Deno.test("screen-layout: full section output per widget type", async () => {
     assertEquals(data.sections, [
       {
         id: "w-text", widget_type: "placeholder_text", title: "Raw title", show_title: true, col_span: 12, position: 0,
-        start_at: null, end_at: null, visible_to: ["guest", "premium"], label: "Info", description: "Watch and earn",
+        start_at: null, end_at: null, visible_to: ["guest", "premium"], challenge_id: "42", label: "Info", description: "Watch and earn",
         link: { type: "internal", url: "rewards/list" },
       },
       {
         id: "w-banner", widget_type: "banner", title: "Summer promo", show_title: true, col_span: 6, position: 1,
-        start_at: null, end_at: null, visible_to: ["guest", "free", "premium"], label: "Banner", description: "",
+        start_at: null, end_at: null, visible_to: ["guest", "free", "premium"], challenge_id: "ch-7", label: "Banner", description: "",
         link: { type: "external", url: "https://example.com/promo" }, image_source: "upload", image_url: `${STORAGE}/banner.png`,
       },
       {
         id: "w-video", widget_type: "video", title: "How it works", show_title: true, col_span: 6, position: 2,
-        start_at: null, end_at: null, visible_to: ["guest", "free", "premium"], label: "Video", description: "",
+        start_at: null, end_at: null, visible_to: ["guest", "free", "premium"], challenge_id: null, label: "Video", description: "",
         link: { type: null, url: null }, video_url: "https://cdn.example.com/intro.mp4",
         image_source: "url", image_url: "https://cdn.example.com/poster.jpg",
       },
       {
         id: "w-custom", widget_type: "custom_widget", title: "Top picks", show_title: false, col_span: 12, position: 3,
-        start_at: null, end_at: null, visible_to: ["guest", "free", "premium"], label: null, description: "Picks",
+        start_at: null, end_at: null, visible_to: ["guest", "free", "premium"], challenge_id: null, label: null, description: "Picks",
         link: { type: null, url: null },
         items: [
           { id: "x1", title: "Dogs", image_source: "upload", image_url: `${STORAGE}/dogs.jpg`, link: { type: "internal", url: "dogs" } },

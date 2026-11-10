@@ -18,6 +18,6 @@ The hook is enabled by `npm install` (`prepare` sets `core.hooksPath` to `.githo
 - `fake.fail(table, method)` makes a table answer with an error, to test error paths.
 - `get(path, params)` / `post(path, body)` build requests with the anon key headers.
 
-`smoke_test.ts` loads every function and checks the CORS preflight. Functions that import private `@digitalvirgo` packages (`bolt-auth-proxy`, `pulsar`, `get-atom-legal-document`) are skipped.
+`smoke_test.ts` loads every function and checks the CORS preflight. Functions that import private `@digitalvirgo` packages (`bolt-auth-proxy`, `pulsar`) are skipped; `atom` runs against `stubs/atom-api.ts`.
 
 New test files must end in `_test.ts`.
