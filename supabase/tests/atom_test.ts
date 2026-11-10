@@ -6,7 +6,8 @@ const ATOM_URL = "https://atom.test";
 const handler = await loadFunction("atom", { ATOM_BASE_URL: ATOM_URL, ATOM_USER: "atom-user", ATOM_SDK_ACCESS_KEY: "atom-key" });
 
 const PRODUCT = 2883;
-const auth = { Authorization: "Bearer backoffice-jwt" };
+const TOKEN = "backoffice-jwt";
+const auth = { Authorization: `Bearer ${TOKEN}` };
 
 atomStub.products.set(String(PRODUCT), {
   offers: [
@@ -19,41 +20,60 @@ atomStub.products.set(String(PRODUCT), {
   legaldocuments: [{ id: 5, name: "Terms", documentType: "terms" }],
 });
 
-/** Atom login and the backoffice role RPC (true only for the backoffice JWT). */
-function routes(fake: FakeSupabase, isBackoffice = true) {
-  fake.route((req, url) => {
+/** Atom login, plus the operator session (Auth user + active bo_backoffice_users row with `role`). */
+function routes(fake: FakeSupabase, role: string | null = "viewer") {
+  fake.route((_req, url) => {
     if (url.origin === ATOM_URL && url.pathname === "/auth/token") {
       return Response.json({ access_token: "atom-token" });
     }
-    if (url.pathname === "/rest/v1/rpc/is_backoffice_role") {
-      const bearer = req.headers.get("Authorization");
-      return Response.json(isBackoffice && bearer === auth.Authorization);
-    }
     return undefined;
   });
+  fake.addAuthUser({ id: "user-1", email: "operator@example.com", token: TOKEN });
+  if (role) fake.seed("backoffice.bo_backoffice_users", [{ id: "bo-1", user_id: "user-1", role, is_active: true }]);
+}
+
+/** A JWT-shaped token whose payload carries app_role (the signature is not checked by the function). */
+function appUserToken(): string {
+  const b64 = (o: unknown) => btoa(JSON.stringify(o)).replace(/=+$/, "");
+  return `${b64({ alg: "HS256" })}.${b64({ app_role: "app_user" })}.sig`;
 }
 
 const call = (body: unknown, headers: Record<string, string> = {}) => handler(post("atom", body, headers));
 
-Deno.test("atom: catalog and pack modes need a backoffice user, legal documents stay public", async () => {
+Deno.test("atom: every mode needs an active backoffice user (viewer or above)", async () => {
+  const modes = ["discover", "documents", "packs", "product", "checkLocalPacks", "skus"];
+  const body = (mode: string) => ({ mode, atom_product_id: PRODUCT, language: "it", format: "terms", platform: "ios" });
+  const expectError = async (res: Response, status: number, error: string, label: string) => {
+    assertEquals(res.status, status, label);
+    assertEquals((await readJson(res)).error, error, label);
+  };
+
   await withFake(async (fake) => {
     routes(fake);
-    for (const mode of ["packs", "product", "checkLocalPacks", "skus"]) {
-      const res = await call({ mode, atom_product_id: PRODUCT, platform: "ios" });
-      assertEquals(res.status, 403, mode);
-      assertEquals((await readJson(res)).error, "Backoffice access required");
-    }
-    const other = await call({ mode: "packs", atom_product_id: PRODUCT }, { Authorization: "Bearer app-user-jwt" });
-    assertEquals(other.status, 403);
-    await other.body?.cancel();
+    for (const mode of modes) await expectError(await call(body(mode)), 401, "Unauthorized", `${mode} without token`);
+    await expectError(await call(body("discover"), { Authorization: "Bearer nope" }), 401, "Unauthorized", "unknown token");
+    await expectError(
+      await call(body("discover"), { Authorization: `Bearer ${appUserToken()}` }),
+      403, "App users are not authorized for this endpoint", "app user",
+    );
 
-    const discover = await call({ mode: "discover", atom_product_id: PRODUCT, language: "IT" });
+    const discover = await call({ mode: "discover", atom_product_id: PRODUCT, language: "IT" }, auth);
     assertEquals(discover.status, 200);
     assertEquals(await readJson(discover), {
       ok: true, requestedLanguage: "it",
       documents: [{ id: "5", name: "Terms", sourceDocumentFormat: "Terms", documentFormat: "terms" }],
       formatsDiscovered: ["terms"],
     });
+  });
+
+  // Signed in, but not an active backoffice user.
+  await withFake(async (fake) => {
+    routes(fake, null);
+    await expectError(await call(body("packs"), auth), 403, "Insufficient permissions", "no backoffice row");
+  });
+  await withFake(async (fake) => {
+    routes(fake, "guest");
+    await expectError(await call(body("discover"), auth), 403, "Insufficient permissions", "unknown role");
   });
 });
 
