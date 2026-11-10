@@ -62,6 +62,65 @@ function renameNamespace(config: Record<string, unknown>, pair: NamespacePair) {
   return next;
 }
 
+const MENU_ITEM_COLUMNS = "id, environment, item_key, label, url, icon, icon_url, display_order, parent_key, visible, enabled, label_i18n_key, route, external_url, auth_required, min_app_version, max_app_version, feature_flag, badge_text, badge_i18n_key, badge_color, screen_slug";
+const MENU_TIER_COLUMNS = "tier, visible, enabled, locked_action, route, external_url, label, label_i18n_key, badge_text, badge_i18n_key, badge_color, display_order, screen_slug";
+
+const menuNamespace = (productSlug: string) => `${camel(productSlug)}MenuItems`;
+
+// Menu rows store text refs as "namespace.key"; refs in the source product's namespace move to the clone's.
+function renameMenuRefs<T extends Record<string, unknown>>(row: T, pair: NamespacePair): T {
+  const out: Record<string, unknown> = { ...row };
+  for (const col of ["label_i18n_key", "badge_i18n_key"]) {
+    const ref = row[col];
+    if (typeof ref === "string" && ref.startsWith(`${pair.from}.`)) out[col] = `${pair.to}${ref.slice(pair.from.length)}`;
+  }
+  return out as T;
+}
+
+// Copies the menu items owned by one level (with their per-tier rules) onto the cloned owner.
+// Rows materialised from the starter menu levels (source_item_id set) are skipped: the
+// bo_products / bo_product_locales seed triggers recreate them for the clone.
+async function cloneMenuItems(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  column: "product_id" | "product_locale_id",
+  sourceId: string,
+  targetId: string,
+  pair: NamespacePair,
+): Promise<number> {
+  try {
+    const { data: items, error } = await admin.schema("backoffice").from("bo_product_menu_items").select(MENU_ITEM_COLUMNS).eq(column, sourceId).is("source_item_id", null);
+    if (error || !items) {
+      if (error) console.error("[error] clone-product: menu items read failed", error.message);
+      return 0;
+    }
+    let cloned = 0;
+    for (const item of items) {
+      const { id: srcId, ...fields } = item;
+      const { data: newItem, error: insErr } = await admin.schema("backoffice")
+        .from("bo_product_menu_items")
+        .insert({ ...renameMenuRefs(fields, pair), [column]: targetId })
+        .select("id")
+        .single();
+      if (insErr || !newItem) {
+        console.warn("[warning] clone-product: menu item copy skipped", item.item_key, insErr?.message);
+        continue;
+      }
+      const { data: tiers } = await admin.schema("backoffice").from("bo_product_menu_item_tiers").select(MENU_TIER_COLUMNS).eq("menu_item_id", srcId);
+      if (tiers && tiers.length > 0) {
+        const { error: tierErr } = await admin.schema("backoffice").from("bo_product_menu_item_tiers")
+          .insert(tiers.map((t: Record<string, unknown>) => ({ ...renameMenuRefs(t, pair), menu_item_id: newItem.id })));
+        if (tierErr) console.error("[error] clone-product: menu item tiers copy failed", item.item_key, tierErr.message);
+      }
+      cloned++;
+    }
+    return cloned;
+  } catch (err) {
+    console.error("[error] clone-product: menu items clone failed", err instanceof Error ? err.message : String(err));
+    return 0;
+  }
+}
+
 async function cloneAppScreens(
   // deno-lint-ignore no-explicit-any
   admin: any,
@@ -221,10 +280,10 @@ Deno.serve(async (req)=>{
       ok: false,
       error: newProdErr.message
     }, 500);
-    // Clone login methods (product level, both environments): drop the defaults seeded by
-    // the product trigger first, so the clone mirrors the source exactly. The defaults are
-    // removed only once the source rows were read; a failure keeps them and is logged.
-    const { data: loginMethods, error: loginReadErr } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").select("environment, type, enabled, is_default, display_order, label_i18n_key, icon, allow_signup, signup_url, feature_flag, min_app_version, max_app_version, config, updated_by").eq("product_id", source_product_id);
+    // Clone login methods (product level, both environments). New products start with no login
+    // method; the delete only clears rows seeded by an older trigger, and runs only once the
+    // source rows were read (a failure keeps them and is logged).
+    const { data: loginMethods, error: loginReadErr } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").select("environment, type, enabled, is_default, display_order, label_i18n_key, icon, feature_flag, min_app_version, max_app_version, config, updated_by").eq("product_id", source_product_id);
     if (loginReadErr) {
       console.error("[error] clone-product: login methods read failed", loginReadErr.message);
     } else if (loginMethods && loginMethods.length > 0) {
@@ -239,6 +298,29 @@ Deno.serve(async (req)=>{
         if (loginWriteErr) console.error("[error] clone-product: login methods copy failed", loginWriteErr.message);
       }
     }
+    // Signup settings (product level, both environments)
+    const { data: signupRows, error: signupReadErr } = await supabaseAdmin.schema("backoffice").from("bo_product_signup_settings").select("environment, enabled, signup_url").eq("product_id", source_product_id);
+    if (signupReadErr) {
+      console.error("[error] clone-product: signup settings read failed", signupReadErr.message);
+    } else if (signupRows && signupRows.length > 0) {
+      const { error: signupWriteErr } = await supabaseAdmin.schema("backoffice").from("bo_product_signup_settings").upsert(signupRows.map((s)=>({
+          ...s,
+          product_id: newProduct.id,
+          updated_by: user.id
+        })), { onConflict: "product_id,environment" });
+      if (signupWriteErr) console.error("[error] clone-product: signup settings copy failed", signupWriteErr.message);
+    }
+    // Product-level assets keep the source file URLs (files are shared, not copied).
+    const { data: productAssets, error: productAssetsReadErr } = await supabaseAdmin.schema("backoffice").from("bo_product_level_assets").select("environment, asset_key, url, mime_type, metadata").eq("product_id", source_product_id);
+    if (productAssetsReadErr) {
+      console.error("[error] clone-product: product assets read failed", productAssetsReadErr.message);
+    } else if (productAssets && productAssets.length > 0) {
+      const { error: productAssetsWriteErr } = await supabaseAdmin.schema("backoffice").from("bo_product_level_assets").insert(productAssets.map((a)=>({
+          ...a,
+          product_id: newProduct.id
+        })));
+      if (productAssetsWriteErr) console.error("[error] clone-product: product assets copy failed", productAssetsWriteErr.message);
+    }
     // URL & Behaviour rules of the product (locale rules are copied with each locale)
     await clonePageBehaviour(supabaseAdmin, "product_id", source_product_id, newProduct.id);
     // 3. Fetch source locales
@@ -250,7 +332,9 @@ Deno.serve(async (req)=>{
     const slugRename = { from: source.slug || "product", to: newProduct.slug || "product" };
     const productScreens = await cloneAppScreens(supabaseAdmin, "product_id", source_product_id, newProduct.id, slugRename);
     let appScreensCloned = productScreens.cloned;
-    const textPairs = [...productScreens.pairs];
+    const menuPair = { from: menuNamespace(slugRename.from), to: menuNamespace(slugRename.to) };
+    let menuItemsCloned = await cloneMenuItems(supabaseAdmin, "product_id", source_product_id, newProduct.id, menuPair);
+    const textPairs = [...productScreens.pairs, menuPair];
     const newLocaleIds: string[] = [];
 
     if (!sourceLocales || sourceLocales.length === 0) {
@@ -260,6 +344,7 @@ Deno.serve(async (req)=>{
         product: newProduct,
         locales_cloned: 0,
         app_screens_cloned: appScreensCloned,
+        menu_items_cloned: menuItemsCloned,
         message: "Product cloned (no locales to copy)",
       });
     }
@@ -316,14 +401,7 @@ Deno.serve(async (req)=>{
           })));
       }
       await clonePageBehaviour(supabaseAdmin, "product_locale_id", srcLocale.id, newLocale.id);
-      // Clone menu items
-      const { data: menuItems } = await supabaseAdmin.schema("backoffice").from("bo_product_menu_items").select("environment, item_key, label, url, icon, display_order, parent_key, visible").eq("product_locale_id", srcLocale.id);
-      if (menuItems && menuItems.length > 0) {
-        await supabaseAdmin.schema("backoffice").from("bo_product_menu_items").insert(menuItems.map((m)=>({
-            ...m,
-            product_locale_id: newLocale.id
-          })));
-      }
+      menuItemsCloned += await cloneMenuItems(supabaseAdmin, "product_locale_id", srcLocale.id, newLocale.id, menuPair);
       // Clone footer items
       const { data: footerItems } = await supabaseAdmin.schema("backoffice").from("bo_product_footer_items").select("environment, item_key, label, url, icon, display_order, item_group, visible").eq("product_locale_id", srcLocale.id);
       if (footerItems && footerItems.length > 0) {
@@ -364,6 +442,7 @@ Deno.serve(async (req)=>{
       product: newProduct,
       locales_cloned: localesCloned,
       app_screens_cloned: appScreensCloned,
+      menu_items_cloned: menuItemsCloned,
       message: `Product cloned successfully with ${localesCloned} locale(s). Secrets were NOT copied for security reasons.`,
     });
   } catch (err) {

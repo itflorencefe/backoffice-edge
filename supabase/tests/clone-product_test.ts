@@ -163,3 +163,57 @@ Deno.test("clone-product: login method failures never drop the seeded defaults b
     "[error] clone-product: login methods copy failed",
   ]);
 });
+
+Deno.test("clone-product: copies menu items (own rows only, refs renamed), signup settings and product assets", async () => {
+  await withFake(async (fake) => {
+    seedEditor(fake, "admin");
+    fake.seed("backoffice.bo_products", [
+      { id: "src", service_id: "svc", slug: "it-test", display_name: "Test IT", country_code: "IT", native_bundle_id: null, timezone: null },
+    ]);
+    fake.seed("backoffice.bo_product_locales", [
+      { id: "loc-src", product_id: "src", language_code: "it", display_name: "Italiano", is_default: true, status: "active" },
+    ]);
+    fake.seed("backoffice.bo_product_menu_items", [
+      { id: "m-prod", product_id: "src", product_locale_id: null, environment: "staging", item_key: "vip", label: "VIP", enabled: true,
+        label_i18n_key: "itTestMenuItems.vipText", badge_i18n_key: "menuItems.sharedBadge", screen_slug: "vip", source_item_id: null },
+      { id: "m-loc", product_id: null, product_locale_id: "loc-src", environment: "staging", item_key: "help", label: "Help", enabled: false,
+        label_i18n_key: "itTestMenuItems.helpText", badge_i18n_key: null, screen_slug: null, source_item_id: null },
+      // Materialised from a starter menu level: recreated by the seed triggers, never copied.
+      { id: "m-seeded", product_id: null, product_locale_id: "loc-src", environment: "staging", item_key: "home", label: "Home", enabled: true, source_item_id: "lvl-1" },
+    ]);
+    fake.seed("backoffice.bo_product_menu_item_tiers", [
+      { menu_item_id: "m-prod", tier: "guest", visible: true, enabled: false, locked_action: "login", label_i18n_key: "itTestMenuItems.vipGuest", screen_slug: "login" },
+    ]);
+    fake.seed("backoffice.bo_product_translations", [
+      { product_locale_id: "loc-src", environment: "staging", namespace: "itTestMenuItems", key: "helpText", value: "Aiuto" },
+    ]);
+    fake.seed("backoffice.bo_product_signup_settings", [
+      { product_id: "src", environment: "staging", enabled: true, signup_url: "/register" },
+    ]);
+    fake.seed("backoffice.bo_product_level_assets", [
+      { product_id: "src", environment: "production", asset_key: "logo", url: "https://cdn.test/logo.png", mime_type: "image/png", metadata: {} },
+    ]);
+
+    const res = await handler(post("clone-product", body, auth));
+    assertEquals(res.status, 200);
+    assertEquals((await readJson(res)).menu_items_cloned, 2);
+
+    const product = fake.rows("backoffice.bo_products").find((p) => p.slug === "fr-test")!;
+    const locale = fake.rows("backoffice.bo_product_locales").find((l) => l.product_id === product.id)!;
+    const items = fake.rows("backoffice.bo_product_menu_items");
+    const prodItem = items.find((m) => m.product_id === product.id)!;
+    assertEquals([prodItem.item_key, prodItem.label_i18n_key, prodItem.badge_i18n_key, prodItem.screen_slug],
+      ["vip", "frTestMenuItems.vipText", "menuItems.sharedBadge", "vip"]);
+    assertEquals(items.filter((m) => m.product_locale_id === locale.id).map((m) => [m.item_key, m.enabled, m.label_i18n_key]),
+      [["help", false, "frTestMenuItems.helpText"]]);
+    const tiers = fake.rows("backoffice.bo_product_menu_item_tiers").filter((t) => t.menu_item_id === prodItem.id);
+    assertEquals(tiers.map((t) => [t.tier, t.label_i18n_key, t.screen_slug]), [["guest", "frTestMenuItems.vipGuest", "login"]]);
+    const texts = fake.rows("backoffice.bo_product_translations").filter((t) => t.product_locale_id === locale.id);
+    assertEquals(texts.map((t) => [t.namespace, t.key]), [["frTestMenuItems", "helpText"]]);
+
+    const signup = fake.rows("backoffice.bo_product_signup_settings").filter((s) => s.product_id === product.id);
+    assertEquals(signup.map((s) => [s.environment, s.enabled, s.signup_url, s.updated_by]), [["staging", true, "/register", "user-1"]]);
+    const assets = fake.rows("backoffice.bo_product_level_assets").filter((a) => a.product_id === product.id);
+    assertEquals(assets.map((a) => [a.environment, a.asset_key, a.url]), [["production", "logo", "https://cdn.test/logo.png"]]);
+  });
+});

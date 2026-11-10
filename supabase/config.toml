@@ -34,14 +34,19 @@ verify_jwt = false
 [functions.get-product-config]
 verify_jwt = false
 
-[functions.get-atom-legal-document]
+[functions.atom]
 verify_jwt = false
 
+[functions.get-product-packs]
+verify_jwt = false
 
 [functions.screen-layout]
 verify_jwt = false
 
 [functions.clone-product]
+verify_jwt = true
+
+[functions.clone-service]
 verify_jwt = true
 
 [functions.dvlive]

@@ -167,20 +167,94 @@ Deno.test("get-product-config: locale values override service defaults", async (
   });
 });
 
-Deno.test("get-product-config: login methods get country phone rules only for MSISDN types", async () => {
+Deno.test("get-product-config: login_methods block with signup settings and country rules only for msisdn", async () => {
   await withFake(async (fake) => {
     seedProduct(fake);
     fake.seed("backoffice.bo_product_login_methods", [
       { product_id: PRODUCT, environment: "staging", type: "google", enabled: true, is_default: false, display_order: 20, config: { app_id: "g-1" } },
-      { product_id: PRODUCT, environment: "staging", type: "msisdn_pin", enabled: true, is_default: true, display_order: 10, config: { pin_length: 6 } },
-      { product_id: PRODUCT, environment: "production", type: "ios", enabled: true, is_default: false, display_order: 0, config: {} },
+      { product_id: PRODUCT, environment: "staging", type: "msisdn", enabled: true, is_default: true, display_order: 10, config: { mode: "password", password_format: "numeric", pin_length: 6 } },
+      { product_id: PRODUCT, environment: "production", type: "apple", enabled: true, is_default: false, display_order: 0, config: {} },
     ]);
-    const methods = (await call(base)).body.login_methods as Row[];
-    assertEquals(methods.map((m) => [m.type, m.order, m.default]), [["msisdn_pin", 10, true], ["google", 20, false]]);
+    fake.seed("backoffice.bo_product_signup_settings", [
+      { product_id: PRODUCT, environment: "staging", enabled: true, signup_url: "/register" },
+    ]);
+    const block = (await call(base)).body.login_methods as { signup: Row; methods: Row[] };
+    assertEquals(block.signup, { enabled: true, url: "/register" });
+    const methods = block.methods;
+    assertEquals(methods.map((m) => [m.type, m.order, m.default]), [["msisdn", 10, true], ["google", 20, false]]);
     const msisdn = methods[0].config as Row;
     assertEquals(msisdn.msisdn_prefix, "+39");
-    assertEquals(msisdn.pin_length, 6);
+    assertEquals([msisdn.mode, msisdn.password_format, msisdn.pin_length], ["password", "numeric", 6]);
     assertEquals(methods[1].config, { app_id: "g-1" });
+    assertEquals("allow_signup" in methods[0], false);
+
+    // A product without rows: signup disabled, no methods, no service fallback.
+    fake.seed("backoffice.bo_product_login_methods", []);
+    fake.seed("backoffice.bo_product_signup_settings", []);
+    fake.seed("backoffice.bo_service_login_methods_defaults", [
+      { service_id: SERVICE, environment: "staging", method_key: "msisdn_pin", enabled: true, display_order: 0, config: {} },
+    ]);
+    assertEquals((await call(base)).body.login_methods, { signup: { enabled: false, url: null }, methods: [] });
+  });
+});
+
+Deno.test("get-product-config: assets merge service < product < language, staging fallback, empty URLs skipped", async () => {
+  await withFake(async (fake) => {
+    seedProduct(fake);
+    const asset = (key: string, url: string, extra: Row) => ({ asset_key: key, url, mime_type: "image/png", metadata: {}, ...extra });
+    fake.seed("backoffice.bo_service_assets_defaults", [
+      asset("logo", "svc-logo", { service_id: SERVICE, environment: "staging" }),
+      asset("bg", "svc-bg", { service_id: SERVICE, environment: "staging" }),
+      asset("icon", "svc-icon", { service_id: SERVICE, environment: "staging" }),
+      asset("empty", "  ", { service_id: SERVICE, environment: "staging" }),
+    ]);
+    fake.seed("backoffice.bo_product_level_assets", [
+      asset("logo", "prod-logo", { product_id: PRODUCT, environment: "staging" }),
+      asset("bg", "prod-bg", { product_id: PRODUCT, environment: "staging" }),
+      asset("splash", "prod-splash", { product_id: PRODUCT, environment: "production" }),
+    ]);
+    fake.seed("backoffice.bo_product_assets", [asset("bg", "loc-bg", { product_locale_id: LOC_IT, environment: "staging" })]);
+
+    const urls = (assets: unknown) => Object.fromEntries(Object.entries(assets as Record<string, Row>).map(([k, v]) => [k, v.url]));
+    assertEquals(urls((await call(base)).body.assets), { logo: "prod-logo", bg: "loc-bg", icon: "svc-icon" });
+    // Production: the service has no production rows, so its staging rows are used.
+    assertEquals(urls((await call({ ...base, environment: "production" })).body.assets), {
+      logo: "svc-logo", bg: "svc-bg", icon: "svc-icon", splash: "prod-splash",
+    });
+  });
+});
+
+Deno.test("get-product-config: menu items from Service, Product and Language rows", async () => {
+  await withFake(async (fake) => {
+    seedProduct(fake);
+    const item = (id: string, owner: Row, key: string, order: number, extra: Row = {}) => ({
+      id, environment: "staging", item_key: key, label: key, url: "", icon: "", icon_url: null, display_order: order,
+      parent_key: null, visible: true, enabled: true, service_id: null, product_id: null, product_locale_id: null,
+      route: null, external_url: null, auth_required: false, label_i18n_key: null, feature_flag: null, badge_text: null,
+      badge_i18n_key: null, badge_color: null, min_app_version: null, max_app_version: null, screen_slug: null, ...owner, ...extra,
+    });
+    fake.seed("backoffice.bo_product_menu_items", [
+      item("s-home", { service_id: SERVICE }, "home", 0, { label: "Service home" }),
+      item("p-home", { product_id: PRODUCT }, "home", 0, { label: "Product home", screen_slug: "home" }),
+      item("s-vip", { service_id: SERVICE }, "vip", 1),
+      item("l-vip", { product_locale_id: LOC_IT }, "vip", 1, { enabled: false }),
+      item("s-news", { service_id: SERVICE }, "news", 2, { badge_i18n_key: "menuItems.newsBadge" }),
+      // The starter menus model can repeat a key across menus of the same language.
+      item("l-help-a", { product_locale_id: LOC_IT }, "help", 3, { label: "Help (main)" }),
+      item("l-help-b", { product_locale_id: LOC_IT }, "help", 4, { label: "Help (footer)" }),
+      item("en-only", { product_locale_id: LOC_EN }, "en", 0),
+      item("other-svc", { service_id: "svc-2" }, "other", 0),
+    ]);
+    fake.seed("backoffice.bo_product_menu_item_tiers", [
+      { menu_item_id: "p-home", tier: "guest", visible: true, enabled: false, locked_action: "login", route: null, external_url: null, label: null, label_i18n_key: null, badge_text: null, badge_i18n_key: null, badge_color: null, display_order: 0, screen_slug: "login" },
+    ]);
+    const items = (await call(base)).body.menu_items as Row[];
+    assertEquals(items.map((m) => [m.key, m.label]), [
+      ["home", "Product home"], ["news", "news"], ["help", "Help (main)"], ["help", "Help (footer)"],
+    ]);
+    assertEquals(items[0].screen_slug, "home");
+    assertEquals((items[0].tiers as Row[])[0].screen_slug, "login");
+    assertEquals(items[1].badge_i18n_key, "menuItems.newsBadge");
   });
 });
 

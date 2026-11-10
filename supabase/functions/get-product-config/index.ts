@@ -177,10 +177,7 @@ const DEFAULT_PHONE_RULES = {
 };
 
 // Types that require MSISDN phone rules injected into their config
-const MSISDN_TYPES = new Set([
-  'msisdn_pin', 'otp', 'pinless',
-  'email_password_msisdn_pin', 'email_password_otp', 'email_password_pinless',
-]);
+const MSISDN_TYPES = new Set(['msisdn']);
 
 // BCP 47 valid locales set for locale resolution
 const VALID_LOCALES: Set<string> = new Set([
@@ -342,12 +339,12 @@ Deno.serve(async (req: Request) => {
     // 4. Fetch service defaults and locale overrides in parallel
     const [
       svcBranding, localeBranding,
-      svcAssets, localeAssets,
+      svcAssets, productAssets, localeAssets,
       svcTranslations, localeTranslations,
       svcConfig, localeConfig,
       svcFlags, localeFlags,
-      svcLoginMethods, localeLoginMethods,
-      svcMenuItems, localeMenuItems,
+      signupSettingsRow, localeLoginMethods,
+      menuItemRows,
       svcFooterItems, localeFooterItems,
       svcAvatar, prodAvatar, localeAvatar,
     ] = await Promise.all([
@@ -359,6 +356,8 @@ Deno.serve(async (req: Request) => {
       // Assets
       supabase.schema("backoffice").from("bo_service_assets_defaults").select("asset_key, url, mime_type, metadata")
         .eq("service_id", service.id).eq("environment", environment),
+      supabase.schema("backoffice").from("bo_product_level_assets").select("asset_key, url, mime_type, metadata")
+        .eq("product_id", product.id).eq("environment", environment),
       supabase.schema("backoffice").from("bo_product_assets").select("asset_key, url, mime_type, metadata")
         .eq("product_locale_id", locale.id).eq("environment", environment),
       // Translations
@@ -376,16 +375,15 @@ Deno.serve(async (req: Request) => {
         .eq("service_id", service.id).eq("environment", environment),
       supabase.schema("backoffice").from("bo_product_feature_flags").select("flag_key, enabled")
         .eq("product_locale_id", locale.id).eq("environment", environment),
-      // Login Methods
-      supabase.schema("backoffice").from("bo_service_login_methods_defaults").select("method_key, enabled, display_order, config")
-        .eq("service_id", service.id).eq("environment", environment).order("display_order"),
-      supabase.schema("backoffice").from("bo_product_login_methods").select("type, enabled, is_default, display_order, label_i18n_key, icon, allow_signup, signup_url, feature_flag, min_app_version, max_app_version, config")
+      // Signup settings + Login Methods (product-level only, no service fallback)
+      supabase.schema("backoffice").from("bo_product_signup_settings").select("enabled, signup_url")
+        .eq("product_id", product.id).eq("environment", environment).maybeSingle(),
+      supabase.schema("backoffice").from("bo_product_login_methods").select("type, enabled, is_default, display_order, label_i18n_key, icon, feature_flag, min_app_version, max_app_version, config")
         .eq("product_id", product.id).eq("environment", environment).order("display_order"),
       // Menu Items
-      supabase.schema("backoffice").from("bo_service_menu_items_defaults").select("item_key, label, url, icon, display_order, parent_key, visible")
-        .eq("service_id", service.id).eq("environment", environment).order("display_order"),
-      supabase.schema("backoffice").from("bo_product_menu_items").select("id, item_key, label, url, icon, icon_url, display_order, parent_key, visible, route, external_url, auth_required, label_i18n_key, feature_flag, badge_text, badge_color, min_app_version, max_app_version")
-        .eq("product_locale_id", locale.id).eq("environment", environment).order("display_order"),
+      supabase.schema("backoffice").from("bo_product_menu_items").select("id, item_key, label, url, icon, icon_url, display_order, parent_key, visible, enabled, service_id, product_id, product_locale_id, route, external_url, auth_required, label_i18n_key, feature_flag, badge_text, badge_i18n_key, badge_color, min_app_version, max_app_version, screen_slug")
+        .eq("environment", environment)
+        .or(`service_id.eq.${service.id},product_id.eq.${product.id},product_locale_id.eq.${locale.id}`),
       // Footer Items
       supabase.schema("backoffice").from("bo_service_footer_items_defaults").select("item_key, label, url, icon, display_order, item_group, visible")
         .eq("service_id", service.id).eq("environment", environment).order("display_order"),
@@ -414,12 +412,17 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 6. Merge assets (key-based, locale wins)
-    const assetsMap: Record<string, { url: string; mime_type: string; metadata: unknown }> = {};
-    for (const a of (svcAssets.data || [])) {
-      assetsMap[a.asset_key] = { url: a.url, mime_type: a.mime_type, metadata: a.metadata };
+    // 6. Merge assets (key-based): service < product < locale. A Service without rows for this
+    // environment falls back to its staging rows; slots without an uploaded file are skipped.
+    let serviceAssetRows = svcAssets.data || [];
+    if (serviceAssetRows.length === 0 && environment !== "staging") {
+      const { data: stagingSvcAssets } = await supabase.schema("backoffice").from("bo_service_assets_defaults")
+        .select("asset_key, url, mime_type, metadata").eq("service_id", service.id).eq("environment", "staging");
+      serviceAssetRows = stagingSvcAssets || [];
     }
-    for (const a of (localeAssets.data || [])) {
+    const assetsMap: Record<string, { url: string; mime_type: string; metadata: unknown }> = {};
+    for (const a of [...serviceAssetRows, ...(productAssets.data || []), ...(localeAssets.data || [])]) {
+      if (!a.url || a.url.trim() === "") continue;
       assetsMap[a.asset_key] = { url: a.url, mime_type: a.mime_type, metadata: a.metadata };
     }
 
@@ -460,16 +463,18 @@ Deno.serve(async (req: Request) => {
       flagsMap[f.flag_key] = f.enabled;
     }
 
-    // 10. Login methods (product-level table replaces service defaults if any exist)
-    // Inject country-specific MSISDN/PIN rules based on product.country_code
+    // 10. login_methods block: { signup, methods }. signup is always present (disabled when no row);
+    // methods is [] for a product without rows. MSISDN gets country phone rules; stored values win.
+    if (signupSettingsRow.error) console.error("[error] [get-product-config] signup settings query failed", signupSettingsRow.error.message);
+    if (localeLoginMethods.error) console.error("[error] [get-product-config] login methods query failed", localeLoginMethods.error.message);
+    const signup = {
+      enabled: signupSettingsRow.data?.enabled ?? false,
+      url: signupSettingsRow.data?.signup_url ?? null,
+    };
     const phoneRules = COUNTRY_PHONE_RULES[product.country_code] || DEFAULT_PHONE_RULES;
-    const productLoginMethodsData = localeLoginMethods.data || [];
-    let loginMethods: unknown[];
-
-    if (productLoginMethodsData.length > 0) {
-      loginMethods = productLoginMethodsData.map((m: {
+    const loginMethods = (localeLoginMethods.data || []).map((m: {
         type: string; enabled: boolean; is_default: boolean; display_order: number;
-        label_i18n_key: string | null; icon: string | null; allow_signup: boolean; signup_url: string | null;
+        label_i18n_key: string | null; icon: string | null;
         feature_flag: string | null; min_app_version: string | null; max_app_version: string | null;
         config: Record<string, unknown>;
       }) => {
@@ -487,31 +492,38 @@ Deno.serve(async (req: Request) => {
           order: m.display_order,
           label_i18n_key: m.label_i18n_key || undefined,
           icon: m.icon || undefined,
-          allow_signup: m.allow_signup,
-          signup_url: m.signup_url || undefined,
           feature_flag: m.feature_flag || undefined,
           min_app_version: m.min_app_version || undefined,
           max_app_version: m.max_app_version || undefined,
           config,
         };
       });
-    } else {
-      // Fallback to service defaults (legacy format)
-      loginMethods = (svcLoginMethods.data || [])
-        .filter((m: { enabled: boolean }) => m.enabled)
-        .map((m: { method_key: string; display_order: number; config: unknown }) => m.method_key);
-    }
 
-    // 11. Menu items (locale replaces service if any exist, with tiers)
-    const localeMenuItemsData = localeMenuItems.data || [];
-    let menuItems: unknown[];
+    // 11. Menu items: Service > Product > Locale chain, per item_key the most
+    // specific level wins; a winning row with enabled = false removes the item.
+    if (menuItemRows.error) console.error("[error] get-product-config: menu items query failed", menuItemRows.error.message);
+    type MenuRow = { id: string; item_key: string; label: string; url: string; icon: string; icon_url: string | null; display_order: number; parent_key: string | null; visible: boolean; enabled: boolean; service_id: string | null; product_id: string | null; product_locale_id: string | null; route: string | null; external_url: string | null; auth_required: boolean; label_i18n_key: string | null; feature_flag: string | null; badge_text: string | null; badge_i18n_key: string | null; badge_color: string | null; min_app_version: string | null; max_app_version: string | null; screen_slug: string | null };
+    // Language rows are all kept (the starter menus model can repeat an item_key across menus);
+    // Service / Product rows only fill the keys the language does not define.
+    const allMenuRows = (menuItemRows.data || []) as MenuRow[];
+    const localeRows = allMenuRows.filter((r) => r.product_locale_id);
+    const localeKeys = new Set(localeRows.map((r) => r.item_key));
+    const inherited = new Map<string, MenuRow>();
+    for (const r of allMenuRows) {
+      if (r.product_locale_id || localeKeys.has(r.item_key)) continue;
+      const current = inherited.get(r.item_key);
+      if (!current || (r.product_id && !current.product_id)) inherited.set(r.item_key, r);
+    }
+    const localeMenuItemsData = [...localeRows, ...inherited.values()]
+      .filter((r) => r.enabled)
+      .sort((a, b) => a.display_order - b.display_order || a.item_key.localeCompare(b.item_key));
+    let menuItems: unknown[] = [];
 
     if (localeMenuItemsData.length > 0) {
-      // Fetch tiers for locale menu items
       const itemIds = localeMenuItemsData.map((m: { id: string }) => m.id);
       const { data: tiersData } = await supabase
         .schema("backoffice").from("bo_product_menu_item_tiers")
-        .select("menu_item_id, tier, visible, enabled, locked_action, route, external_url, label, label_i18n_key, badge_text, badge_color, display_order")
+        .select("menu_item_id, tier, visible, enabled, locked_action, route, external_url, label, label_i18n_key, badge_text, badge_i18n_key, badge_color, display_order, screen_slug")
         .in("menu_item_id", itemIds);
 
       const tiersByItem: Record<string, unknown[]> = {};
@@ -523,24 +535,27 @@ Deno.serve(async (req: Request) => {
           enabled: t.enabled,
           locked_action: t.locked_action,
           route: t.route || undefined,
+          screen_slug: t.screen_slug || undefined,
           external_url: t.external_url || undefined,
           label: t.label || undefined,
           label_i18n_key: t.label_i18n_key || undefined,
           badge_text: t.badge_text || undefined,
+          badge_i18n_key: t.badge_i18n_key || undefined,
           badge_color: t.badge_color || undefined,
           display_order: t.display_order,
         });
       }
 
       menuItems = localeMenuItemsData
-        .filter((m: { visible: boolean }) => m.visible)
-        .map((m: { id: string; item_key: string; label: string; url: string; icon: string; icon_url: string | null; display_order: number; parent_key: string | null; route: string | null; external_url: string | null; auth_required: boolean; label_i18n_key: string | null; feature_flag: string | null; badge_text: string | null; badge_color: string | null; min_app_version: string | null; max_app_version: string | null }) => ({
+        .filter((m) => m.visible)
+        .map((m) => ({
           key: m.item_key,
           label: m.label,
           label_i18n_key: m.label_i18n_key || undefined,
           icon: m.icon,
           icon_url: m.icon_url || undefined,
           route: m.route || undefined,
+          screen_slug: m.screen_slug || undefined,
           external_url: m.external_url || undefined,
           url: m.url || undefined,
           position: m.display_order,
@@ -548,23 +563,11 @@ Deno.serve(async (req: Request) => {
           auth_required: m.auth_required || false,
           feature_flag: m.feature_flag || undefined,
           badge_text: m.badge_text || undefined,
+          badge_i18n_key: m.badge_i18n_key || undefined,
           badge_color: m.badge_color || undefined,
           min_app_version: m.min_app_version || undefined,
           max_app_version: m.max_app_version || undefined,
           tiers: tiersByItem[m.id] || [],
-        }));
-    } else {
-      const svcMenuItemsData = svcMenuItems.data || [];
-      menuItems = svcMenuItemsData
-        .filter((m: { visible: boolean }) => m.visible)
-        .map((m: { item_key: string; label: string; url: string; icon: string; display_order: number; parent_key: string | null }) => ({
-          key: m.item_key,
-          label: m.label,
-          url: m.url,
-          icon: m.icon,
-          position: m.display_order,
-          parent_key: m.parent_key || undefined,
-          tiers: [],
         }));
     }
 
@@ -592,12 +595,25 @@ Deno.serve(async (req: Request) => {
 
     const footerHiddenPages = (footerHiddenPagesData || []).map((r: { page_path: string }) => r.page_path);
 
-    // 13. Page behaviour rules (Service > Product > Language, the most specific level wins per path)
-    const { data: pageBehaviourRows } = await supabase
+    // 13. Page behaviour rules: Service > Product > Locale chain.
+    // For each path the most specific level wins; a winning row with
+    // enabled = false hides the path entirely (disables the inherited rule).
+    const { data: pageBehaviourRaw } = await supabase
       .schema("backoffice").from("bo_page_behaviour_rules")
-      .select("id, service_id, product_id, product_locale_id, path, label, position, enabled")
-      .or(`service_id.eq.${service.id},product_id.eq.${product.id},product_locale_id.eq.${locale.id}`)
-      .eq("environment", environment);
+      .select("id, path, label, position, enabled, service_id, product_id, product_locale_id")
+      .eq("environment", environment)
+      .or(`service_id.eq.${service.id},product_id.eq.${product.id},product_locale_id.eq.${locale.id}`);
+
+    type PbRule = { id: string; path: string; label: string | null; position: number; enabled: boolean; service_id: string | null; product_id: string | null; product_locale_id: string | null };
+    const pbRank = (r: PbRule) => (r.product_locale_id ? 3 : r.product_id ? 2 : 1);
+    const pbByPath = new Map<string, PbRule>();
+    for (const r of (pageBehaviourRaw || []) as PbRule[]) {
+      const current = pbByPath.get(r.path);
+      if (!current || pbRank(r) > pbRank(current)) pbByPath.set(r.path, r);
+    }
+    const pageBehaviourRules = [...pbByPath.values()]
+      .filter((r) => r.enabled)
+      .sort((a, b) => a.position - b.position || a.path.localeCompare(b.path));
 
     // 14. Documents
     const { data: documentsData } = await supabase
@@ -617,53 +633,35 @@ Deno.serve(async (req: Request) => {
       updated_at: d.updated_at,
     }));
 
-    type PageBehaviourRow = {
-      id: string; service_id: string | null; product_id: string | null; product_locale_id: string | null;
-      path: string; label: string | null; position: number; enabled: boolean;
-    };
-    const levelRank = (r: PageBehaviourRow) => (r.product_locale_id ? 3 : r.product_id ? 2 : 1);
-    const winningRules = new Map<string, PageBehaviourRow>();
-    for (const r of (pageBehaviourRows || []) as PageBehaviourRow[]) {
-      const current = winningRules.get(r.path);
-      if (!current || levelRank(r) > levelRank(current)) winningRules.set(r.path, r);
-    }
-    const pageBehaviourRules = [...winningRules.values()]
-      .filter((r) => r.enabled)
-      .sort((a, b) => a.position - b.position || a.path.localeCompare(b.path));
-
     let pageBehaviour: unknown[] = [];
-    if (pageBehaviourRules.length > 0) {
-      const ruleIds = pageBehaviourRules.map((r) => r.id);
+    if (pageBehaviourRules && pageBehaviourRules.length > 0) {
+      const ruleIds = pageBehaviourRules.map((r: { id: string }) => r.id);
       const { data: tierRules } = await supabase
         .schema("backoffice").from("bo_page_behaviour_tier_rules")
         .select("rule_id, tier, action, redirect_url, screen_slug")
         .in("rule_id", ruleIds);
 
-      // Each tier becomes { type, to }: redirect -> URL, screen -> screen slug, allow -> null/null.
-      type TierTarget = { type: "redirect" | "screen" | null; to: string | null };
-      const tiersByRule: Record<string, Record<string, TierTarget>> = {};
-      for (const t of (tierRules || []) as { rule_id: string; tier: string; action: string; redirect_url: string | null; screen_slug: string | null }[]) {
+      // type/to contract: redirect -> URL, screen -> App Screen slug, null/null -> show the page.
+      type PbTier = { type: "redirect" | "screen" | null; to: string | null };
+      const toTier = (t: { action: string; redirect_url: string | null; screen_slug: string | null }): PbTier => {
+        if (t.action === "redirect" && t.redirect_url) return { type: "redirect", to: t.redirect_url };
+        if (t.action === "screen" && t.screen_slug) return { type: "screen", to: t.screen_slug };
+        return { type: null, to: null };
+      };
+      const tiersByRule: Record<string, Record<string, PbTier>> = {};
+      for (const t of (tierRules || [])) {
         if (!tiersByRule[t.rule_id]) tiersByRule[t.rule_id] = {};
-        tiersByRule[t.rule_id][t.tier] =
-          t.action === "redirect" ? { type: "redirect", to: t.redirect_url || null }
-          : t.action === "screen" ? { type: "screen", to: t.screen_slug || null }
-          : { type: null, to: null };
+        tiersByRule[t.rule_id][t.tier] = toTier(t);
       }
 
-      const allow: TierTarget = { type: null, to: null };
-      pageBehaviour = pageBehaviourRules.map((r) => {
-        const tiers = tiersByRule[r.id] || {};
-        return {
-          path: r.path,
-          label: r.label || undefined,
-          position: r.position,
-          tiers: {
-            guest: tiers.guest ?? allow,
-            free: tiers.free ?? allow,
-            premium: tiers.premium ?? allow,
-          },
-        };
-      });
+      pageBehaviour = pageBehaviourRules.map((r) => ({
+        path: r.path,
+        label: r.label || undefined,
+        position: r.position,
+        tiers: Object.fromEntries(
+          ["guest", "free", "premium"].map((tier) => [tier, tiersByRule[r.id]?.[tier] ?? { type: null, to: null }]),
+        ),
+      }));
     }
 
     // 15. Content consumption rules
@@ -769,7 +767,7 @@ Deno.serve(async (req: Request) => {
       translations: translationsMap,
       config: configMap,
       feature_flags: flagsMap,
-      login_methods: loginMethods,
+      login_methods: { signup, methods: loginMethods },
       menu_items: menuItems,
       footer_items: footerItems,
       footer_columns: (locale as Record<string, unknown>)[environment === 'production' ? 'footer_columns_production' : 'footer_columns_staging'] as number || 1,

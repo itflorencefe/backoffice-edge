@@ -8,7 +8,7 @@
 import { assert } from "@std/assert";
 import { loadFunction, withFake } from "./harness.ts";
 
-const PRIVATE_PACKAGES = new Set(["bolt-auth-proxy", "pulsar", "get-atom-legal-document"]);
+const PRIVATE_PACKAGES = new Set(["bolt-auth-proxy", "pulsar"]);
 
 const functionsDir = new URL("../functions/", import.meta.url);
 const names: string[] = [];
