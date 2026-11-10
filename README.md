@@ -89,4 +89,12 @@ npm run check:migrations    # migrations rule against origin/develop
 node scripts/sync-consumer.mjs --target ../starter-backoffice-template --dry-run   # what a sync would change
 ```
 
-`npm install` enables the pre-commit hook (`.githooks/pre-commit`), which runs both test suites.
+`npm install` enables the hooks in `.githooks/`: `pre-commit` runs both test suites, `pre-push` refuses direct pushes to `main` and `develop`.
+
+Start a branch without tracking `develop`, then push it under its own name:
+
+```bash
+git fetch origin
+git switch --no-track -c feature/my-change origin/develop
+git push -u origin HEAD
+```

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Refuses pushes that update main or develop directly (git flow: pull requests on develop,
+# main moved only by Actions → Release). Admins bypass the GitHub rulesets, so this is the
+# local guard against a branch whose upstream is origin/develop.
+# Skip once with: git push --no-verify
+
+blocked=""
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main | refs/heads/develop) blocked="$blocked ${remote_ref#refs/heads/}" ;;
+  esac
+done
+
+if [ -n "$blocked" ]; then
+  echo "pre-push: direct push to$blocked refused."
+  echo "  Push your branch and open a pull request on develop:"
+  echo "    git push -u origin HEAD"
+  echo "  (a branch created from origin/develop tracks develop: use 'git branch --unset-upstream' or --no-track)"
+  echo "  Skip once with: git push --no-verify"
+  exit 1
+fi
