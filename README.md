@@ -2,6 +2,10 @@
 
 Single source of the `supabase/` folder shared by the back office repos: edge functions, migrations, seeds, `config.toml` and the edge function tests. Change these files here, never in the repos that use them: every merge on `main` opens an update pull request in each registered repo.
 
+## Try a change locally
+
+Run the working tree on a local Supabase stack and use it from the starter before opening a PR: see [`docs/LOCAL_DEV.md`](docs/LOCAL_DEV.md) (`npm run local:start`, `local:functions`, `local:dev`).
+
 ## How a change travels
 
 1. **Pull request here.**

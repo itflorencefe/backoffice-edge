@@ -9,6 +9,15 @@
     "check:migrations": "node scripts/check-migrations.mjs",
     "sync": "node scripts/sync-consumer.mjs",
     "test:sync": "node --test scripts/*.test.mjs",
+    "local:start": "node scripts/local-dev.mjs start",
+    "local:migrate": "node scripts/local-dev.mjs migrate",
+    "local:reset": "node scripts/local-dev.mjs reset",
+    "local:npmrc": "node scripts/local-dev.mjs npmrc",
+    "local:functions": "node scripts/local-dev.mjs functions",
+    "local:consumer": "node scripts/local-dev.mjs consumer",
+    "local:dev": "node scripts/local-dev.mjs dev --target ../starter-backoffice-template",
+    "local:status": "node scripts/local-dev.mjs status",
+    "local:stop": "node scripts/local-dev.mjs stop",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   }
 }

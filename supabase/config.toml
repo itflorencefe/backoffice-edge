@@ -3,6 +3,11 @@
 # Full reference: https://supabase.com/docs/guides/cli/config
 project_id = "bolt-migration"
 
+[api]
+# Local stack only (npm run local:start): the back office tables live in the `backoffice` schema.
+schemas = ["public", "graphql_public", "backoffice"]
+extra_search_path = ["public", "extensions"]
+
 [db]
 major_version = 17
 
