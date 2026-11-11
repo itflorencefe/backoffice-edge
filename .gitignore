@@ -9,3 +9,6 @@ node_modules
 .env.*
 supabase/.temp
 supabase/.branches
+
+# Atom runner: SDK credentials (copy config.example.json)
+atom/runner/config.json

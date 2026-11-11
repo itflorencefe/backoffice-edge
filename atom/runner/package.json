@@ -1,0 +1,25 @@
+{
+  "name": "atom-legal-runner",
+  "version": "1.0.0",
+  "description": "Atom packs and legal documents API reference runner (no Supabase)",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "run.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node run.js",
+    "test": "node --test atomLegalClient.test.js",
+    "help": "node run.js help",
+    "login": "node run.js login",
+    "getProductSkus": "node run.js getProductSkus",
+    "getProduct": "node run.js getProduct",
+    "getPacks": "node run.js getPacks",
+    "discover": "node run.js discover",
+    "getDocumentHtml": "node run.js getDocumentHtml"
+  },
+  "dependencies": {
+    "@digitalvirgo/atom-api": "1.25.0"
+  }
+}

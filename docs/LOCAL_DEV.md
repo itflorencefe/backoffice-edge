@@ -53,6 +53,18 @@ ATOM_SDK_ACCESS_KEY=...
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are set by the CLI.
 
+## Atom smoke tests
+
+`atom` requires the session of an active backoffice user. To call it from the terminal, create the local smoke
+account once (again after `local:reset`) and run the scripts while the functions are served:
+
+```sh
+docker exec -i supabase_db_bolt-migration psql -U postgres -d postgres -v ON_ERROR_STOP=1 < atom/script/local-smoke-user.sql
+./atom/script/smoke-get-packs.sh
+```
+
+Details, the other scripts and the direct Atom runner: [`atom/README.md`](../atom/README.md).
+
 ## How the back office uses it
 
 `local:dev` runs `vite --mode edge` in the back office: Vite loads `.env.edge.local` (gitignored by `*.local`) over

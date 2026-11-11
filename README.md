@@ -6,6 +6,10 @@ Single source of the `supabase/` folder shared by the back office repos: edge fu
 
 Run the working tree on a local Supabase stack and use it from the starter before opening a PR: see [`docs/LOCAL_DEV.md`](docs/LOCAL_DEV.md) (one command: `npm run local:dev`).
 
+## Atom dev kit
+
+[`atom/`](atom/README.md) holds the Atom runner (direct SDK calls) and the smoke tests of the `atom` edge function. It is never synced to the consumers.
+
 ## How a change travels (git flow)
 
 `develop` is the integration branch, `main` holds only released versions.

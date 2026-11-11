@@ -1,0 +1,44 @@
+{
+  "environment": "staging",
+
+  "staging": {
+    "baseUrl": "https://staging.atom.digitalvirgo.com",
+    "user": "your-sdk-user",
+    "sdkAccessKey": "your-sdk-access-key"
+  },
+
+  "production": {
+    "baseUrl": "https://atom.digitalvirgo.com",
+    "user": "",
+    "sdkAccessKey": ""
+  },
+
+  "action": "discover",
+
+  "login": {},
+
+  "getProductSkus": {
+    "atom_product_id": 2582,
+    "platform": "appstore"
+  },
+
+  "getProduct": {
+    "atom_product_id": 2930
+  },
+
+  "getPacks": {
+    "atom_product_id": 2930
+  },
+
+  "discover": {
+    "atom_product_id": 2582,
+    "language": "fr"
+  },
+
+  "getDocumentHtml": {
+    "atom_product_id": 2582,
+    "language": "fr",
+    "document_format": "data_privacy",
+    "date": ""
+  }
+}
