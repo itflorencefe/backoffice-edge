@@ -9,9 +9,12 @@
  *   node scripts/local-dev.mjs npmrc --from <file>   Copy an .npmrc into the functions with private npm packages
  *   node scripts/local-dev.mjs functions             Serve the edge functions (hot reload, Ctrl+C to stop)
  *   node scripts/local-dev.mjs consumer --target <dir>  Write <dir>/.env.edge.local pointing at the local stack
- *   node scripts/local-dev.mjs dev --target <dir> [--port 5174]
- *                                                   Same, then run the consumer's Vite dev server on it
- *                                                   (`vite --mode edge`; its own port, so its own browser storage)
+ *   node scripts/local-dev.mjs dev --target <dir> [--port 5174] [--no-functions]
+ *                                                   All in one: start + migrate, .npmrc copied from <dir> when
+ *                                                   missing, functions served, <dir>/.env.edge.local written and
+ *                                                   the consumer's Vite dev server run on it (`vite --mode edge`,
+ *                                                   its own port, so its own browser storage). Ctrl+C stops the
+ *                                                   functions and Vite; the stack keeps running (`stop`).
  *   node scripts/local-dev.mjs status                URLs of the running stack (no keys)
  *   node scripts/local-dev.mjs stop                  Stop the stack (data is kept)
  *
@@ -19,7 +22,7 @@
  * Keys are never printed.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,8 +40,20 @@ function supabase(args, { capture = false } = {}) {
     encoding: 'utf-8',
   });
   if (res.error) throw new Error(`supabase CLI not runnable: ${res.error.message}`);
-  if (res.status !== 0) throw new Error(`supabase ${args.join(' ')} failed (exit ${res.status})`);
+  if (res.status !== 0) {
+    const err = new Error(`supabase ${args.join(' ')} failed (exit ${res.status})`);
+    err.stdout = res.stdout ?? '';
+    throw err;
+  }
   return res.stdout ?? '';
+}
+
+/** Drops the lines that carry keys, secrets or passwords (output of `supabase start`). */
+function withoutSecrets(text) {
+  return text
+    .split('\n')
+    .filter((line) => !/key|secret|jwt|token|password/i.test(line))
+    .join('\n');
 }
 
 /** `supabase status -o env` as an object (contains keys: never print it). */
@@ -149,12 +164,117 @@ container names under those domains to 127.0.0.1. Remove the search domains from
 `);
 }
 
-function runConsumerDev(target, port) {
-  writeConsumerEnv(target);
+/** project_id of supabase/config.toml (names the local containers). */
+function projectId() {
+  const toml = fs.readFileSync(path.join(ROOT, 'supabase/config.toml'), 'utf-8');
+  return toml.match(/^project_id\s*=\s*"([^"]+)"/m)?.[1] ?? '';
+}
+
+/** Stops the container of `functions serve` when the CLI left it running. */
+function stopFunctionsContainer() {
+  const name = `supabase_edge_runtime_${projectId()}`;
+  const ps = spawnSync('docker', ['ps', '-q', '--filter', `name=^${name}$`], { encoding: 'utf-8' });
+  if (ps.stdout?.trim()) spawnSync('docker', ['stop', name], { stdio: 'ignore' });
+}
+
+/** Starts the stack (no-op when running) and applies the new migrations. */
+function startStack() {
+  // Functions are served by `functions` / `dev` (hot reload, secrets from supabase/functions/.env).
+  // stdout of `supabase start` ends with the API keys: captured, never printed as is.
+  try {
+    supabase(['start', '-x', 'edge-runtime'], { capture: true });
+  } catch (err) {
+    if (err.stdout) console.error(withoutSecrets(err.stdout).trim().split('\n').slice(-40).join('\n'));
+    dnsSearchHint();
+    throw err;
+  }
+  supabase(['migration', 'up', '--local']);
+  printStatus();
+}
+
+/** Copies <dir>/.npmrc into the private functions that have none (the consumer has the token). */
+function npmrcFromConsumer(dir) {
+  const missing = privateFunctions().filter((name) => !fs.existsSync(path.join(FUNCTIONS_DIR, name, '.npmrc')));
+  const source = path.join(dir, '.npmrc');
+  if (missing.length > 0 && fs.existsSync(source)) copyNpmrc(source);
+}
+
+/** Runs a child process with its output lines prefixed (lines with keys dropped); onLine sees every line. */
+function startChild(label, command, args, cwd, onLine = () => {}) {
+  // Own process group: a signal to the group also reaches grandchildren (npx → vite).
+  const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  for (const stream of [child.stdout, child.stderr]) {
+    let rest = '';
+    stream.setEncoding('utf-8');
+    stream.on('data', (chunk) => {
+      const lines = (rest + chunk).split('\n');
+      rest = lines.pop() ?? '';
+      for (const line of lines) {
+        onLine(line);
+        if (!/key|secret|token|password/i.test(line)) process.stdout.write(`[${label}] ${line}\n`);
+      }
+    });
+  }
+  return child;
+}
+
+/** Everything for a local session: stack, functions and the consumer's dev server. */
+async function runDev(target, port, withFunctions) {
+  if (!target) throw new Error('--target <consumer checkout dir> is required');
   const dir = path.resolve(target);
+  startStack();
+  writeConsumerEnv(target);
+
+  const children = [];
+  let stopping = false;
+  const running = (c) => c.exitCode === null && c.signalCode === null;
+  const stopAll = (code) => {
+    if (stopping) return;
+    stopping = true;
+    for (const child of children) {
+      if (!running(child)) continue;
+      try {
+        process.kill(-child.pid, 'SIGINT');
+      } catch {
+        child.kill('SIGINT');
+      }
+    }
+    const done = () => {
+      stopFunctionsContainer();
+      console.log('Stopped functions and dev server. The stack keeps running: npm run local:stop to stop it.');
+      process.exit(code);
+    };
+    setTimeout(done, 10_000).unref();
+    Promise.all(children.filter(running).map((c) => new Promise((r) => c.on('exit', r)))).then(done);
+  };
+  process.on('SIGINT', () => stopAll(0));
+  process.on('SIGTERM', () => stopAll(0));
+
+  if (withFunctions) {
+    npmrcFromConsumer(dir);
+    const args = ['functions', 'serve'];
+    if (fs.existsSync(FUNCTIONS_ENV)) args.push('--env-file', FUNCTIONS_ENV);
+    else console.warn('No supabase/functions/.env: functions needing secrets (Atom, Pulsar, ...) will answer with errors.');
+    let ready = () => {};
+    const served = new Promise((resolve) => (ready = resolve));
+    const functions = startChild('functions', 'supabase', args, ROOT, (line) => {
+      if (/Serving functions on/.test(line)) ready();
+    });
+    children.push(functions);
+    functions.on('exit', (code) => {
+      if (!stopping) console.error(`Functions server exited (${code}).`);
+      ready();
+      stopAll(code ?? 1);
+    });
+    // The first run pulls the runtime image: wait for it before opening the app.
+    await Promise.race([served, new Promise((r) => setTimeout(r, 180_000))]);
+    if (stopping) return;
+  }
+
   console.log(`Starting ${path.basename(dir)} on http://localhost:${port} against the local stack...`);
-  const res = spawnSync('npx', ['vite', '--mode', 'edge', '--port', port, '--strictPort'], { cwd: dir, stdio: 'inherit' });
-  if (res.status !== 0 && res.signal !== 'SIGINT') process.exit(res.status ?? 1);
+  const vite = startChild('app', 'npx', ['vite', '--mode', 'edge', '--port', port, '--strictPort'], dir);
+  children.push(vite);
+  vite.on('exit', (code) => stopAll(code ?? 0));
 }
 
 function option(argv, name) {
@@ -166,15 +286,7 @@ function main(argv) {
   const [command] = argv;
   switch (command) {
     case 'start':
-      // Functions are served by `local:functions` (hot reload, secrets from supabase/functions/.env).
-      try {
-        supabase(['start', '-x', 'edge-runtime']);
-      } catch (err) {
-        dnsSearchHint();
-        throw err;
-      }
-      supabase(['migration', 'up', '--local']);
-      printStatus();
+      startStack();
       return;
     case 'migrate':
       supabase(['migration', 'up', '--local']);
@@ -192,8 +304,7 @@ function main(argv) {
       writeConsumerEnv(option(argv, '--target'));
       return;
     case 'dev':
-      runConsumerDev(option(argv, '--target'), option(argv, '--port') || '5174');
-      return;
+      return runDev(option(argv, '--target'), option(argv, '--port') || '5174', !argv.includes('--no-functions'));
     case 'status':
       printStatus();
       return;
@@ -201,14 +312,14 @@ function main(argv) {
       supabase(['stop']);
       return;
     default:
-      console.error('Usage: node scripts/local-dev.mjs start|migrate|reset|npmrc --from <file>|functions|consumer --target <dir>|dev --target <dir> [--port n]|status|stop');
+      console.error('Usage: node scripts/local-dev.mjs start|migrate|reset|npmrc --from <file>|functions|consumer --target <dir>|dev --target <dir> [--port n] [--no-functions]|status|stop');
       process.exit(1);
   }
 }
 
-try {
-  main(process.argv.slice(2));
-} catch (err) {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-}
+Promise.resolve()
+  .then(() => main(process.argv.slice(2)))
+  .catch((err) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });

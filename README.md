@@ -4,7 +4,7 @@ Single source of the `supabase/` folder shared by the back office repos: edge fu
 
 ## Try a change locally
 
-Run the working tree on a local Supabase stack and use it from the starter before opening a PR: see [`docs/LOCAL_DEV.md`](docs/LOCAL_DEV.md) (`npm run local:start`, `local:functions`, `local:dev`).
+Run the working tree on a local Supabase stack and use it from the starter before opening a PR: see [`docs/LOCAL_DEV.md`](docs/LOCAL_DEV.md) (one command: `npm run local:dev`).
 
 ## How a change travels (git flow)
 
