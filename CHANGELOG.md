@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.0](https://github.com/itflorencefe/backoffice-edge/compare/1.0.0...1.1.0) (2026-11-11)
+
+### Features
+
+* add docker env for local dev ([8eedabe](https://github.com/itflorencefe/backoffice-edge/commit/8eedabee5c55f3f302dec702e03578d7ec0fa6dd))
+* Merge pull request [#8](https://github.com/itflorencefe/backoffice-edge/issues/8) from itflorencefe/feature/local-docker-env ([9c9005e](https://github.com/itflorencefe/backoffice-edge/commit/9c9005e6d84b49a5dbd846ee564430706e4528df))
+
+### Chores
+
+* add the runner for test atom on locale dev ([400f727](https://github.com/itflorencefe/backoffice-edge/commit/400f72748b36431ce6d2e148c2911327bb2bf312))
+
 ## 1.0.0 (2026-11-10)
 
 ### Features
