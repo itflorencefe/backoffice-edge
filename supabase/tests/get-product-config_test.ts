@@ -11,8 +11,8 @@ const LOC_IT = "loc-it";
 const LOC_EN = "loc-en";
 
 function seedProduct(fake: FakeSupabase) {
-  fake.seed("backoffice.bo_services", [{ id: SERVICE, slug: "test", display_name: "Test", status: "active" }]);
-  fake.seed("backoffice.bo_products", [
+  fake.seed("backoffice.services", [{ id: SERVICE, slug: "test", display_name: "Test", status: "active" }]);
+  fake.seed("backoffice.products", [
     {
       id: PRODUCT, service_id: SERVICE, slug: "it-test", display_name: "Test IT", country_code: "IT", status: "active",
       is_default: false, native_bundle_id: null, hostname_staging: "staging.test.it", hostname_production: "www.test.it",
@@ -22,7 +22,7 @@ function seedProduct(fake: FakeSupabase) {
       is_default: true, native_bundle_id: null, hostname_staging: null, hostname_production: null,
     },
   ]);
-  fake.seed("backoffice.bo_product_locales", [
+  fake.seed("backoffice.product_locales", [
     { id: LOC_IT, product_id: PRODUCT, language_code: "it", display_name: "Italiano", is_default: true, status: "active", locale_override: null, footer_columns_staging: 3, footer_columns_production: 2 },
     { id: LOC_EN, product_id: PRODUCT, language_code: "en", display_name: "English", is_default: false, status: "active", locale_override: "en-GB", footer_columns_staging: 1, footer_columns_production: 1 },
     { id: "loc-fr", product_id: "prod-fr", language_code: "fr", display_name: "Français", is_default: true, status: "active", locale_override: null, footer_columns_staging: 1, footer_columns_production: 1 },
@@ -76,7 +76,7 @@ Deno.test("get-product-config: resolves by slug+country, by domain and falls bac
 Deno.test("get-product-config: resolves by bundle_id (with country, or the default product of the bundle)", async () => {
   await withFake(async (fake) => {
     seedProduct(fake);
-    for (const p of fake.rows("backoffice.bo_products")) p.native_bundle_id = "com.test.app";
+    for (const p of fake.rows("backoffice.products")) p.native_bundle_id = "com.test.app";
 
     const withCountry = await call({ bundle_id: "com.test.app", country_code: "it", environment: "production" });
     assertEquals(withCountry.status, 200);
@@ -120,7 +120,7 @@ Deno.test("get-product-config: language resolution and locale codes", async () =
 Deno.test("get-product-config: product without active languages returns 404", async () => {
   await withFake(async (fake) => {
     seedProduct(fake);
-    fake.seed("backoffice.bo_product_locales", []);
+    fake.seed("backoffice.product_locales", []);
     const { status, body } = await call(base);
     assertEquals(status, 404);
     assertEquals(body.error, "No active language configured for this product");
@@ -131,35 +131,39 @@ Deno.test("get-product-config: locale values override service defaults", async (
   await withFake(async (fake) => {
     seedProduct(fake);
     const env = { environment: "staging" };
-    fake.seed("backoffice.bo_service_branding_defaults", [
+    fake.seed("backoffice.service_branding_defaults", [
       { service_id: SERVICE, ...env, colors: { primary: "#000", secondary: "#111" }, fonts: { body: "Inter" } },
     ]);
-    fake.seed("backoffice.bo_product_branding", [{ product_locale_id: LOC_IT, ...env, colors: { primary: "#f00" } }]);
-    fake.seed("backoffice.bo_service_translations_defaults", [
+    fake.seed("backoffice.product_branding", [{ product_locale_id: LOC_IT, ...env, colors: { primary: "#f00" } }]);
+    fake.seed("backoffice.service_translations_defaults", [
       { service_id: SERVICE, ...env, language_code: "it", namespace: "home", key: "title", value: "Servizio" },
       { service_id: SERVICE, ...env, language_code: "it", namespace: "home", key: "cta", value: "Gioca" },
       { service_id: SERVICE, ...env, language_code: "en", namespace: "home", key: "title", value: "English" },
     ]);
-    fake.seed("backoffice.bo_product_translations", [
+    fake.seed("backoffice.product_translations", [
       { product_locale_id: LOC_IT, ...env, namespace: "home", key: "title", value: "Prodotto" },
       { product_locale_id: LOC_IT, environment: "production", namespace: "home", key: "cta", value: "Prod" },
     ]);
-    fake.seed("backoffice.bo_service_public_config_defaults", [
+    // One table, three owners: service < product < locale.
+    fake.seed("backoffice.product_public_config", [
       { service_id: SERVICE, ...env, key: "A", value: "svc" },
       { service_id: SERVICE, ...env, key: "B", value: "svc" },
+      { service_id: SERVICE, ...env, key: "C", value: "svc" },
+      { product_id: PRODUCT, ...env, key: "B", value: "prd" },
+      { product_id: PRODUCT, ...env, key: "C", value: "prd" },
+      { product_locale_id: LOC_IT, ...env, key: "B", value: "loc" },
     ]);
-    fake.seed("backoffice.bo_product_public_config", [{ product_locale_id: LOC_IT, ...env, key: "B", value: "loc" }]);
-    fake.seed("backoffice.bo_service_feature_flags_defaults", [
+    fake.seed("backoffice.service_feature_flags_defaults", [
       { service_id: SERVICE, ...env, flag_key: "quiz", enabled: false },
       { service_id: SERVICE, ...env, flag_key: "games", enabled: true },
     ]);
-    fake.seed("backoffice.bo_product_feature_flags", [{ product_locale_id: LOC_IT, ...env, flag_key: "quiz", enabled: true }]);
+    fake.seed("backoffice.product_feature_flags", [{ product_locale_id: LOC_IT, ...env, flag_key: "quiz", enabled: true }]);
 
     const { body } = await call(base);
     assertEquals((body.branding as Row).colors, { primary: "#f00", secondary: "#111" });
     assertEquals((body.branding as Row).fonts, { body: "Inter" });
     assertEquals(body.translations, { home: { title: "Prodotto", cta: "Gioca" } });
-    assertEquals(body.config, { A: "svc", B: "loc" });
+    assertEquals(body.config, { A: "svc", B: "loc", C: "prd" });
     assertEquals(body.feature_flags, { quiz: true, games: true });
 
     const dict = await call({ ...base, "show-dict": "1" });
@@ -170,12 +174,12 @@ Deno.test("get-product-config: locale values override service defaults", async (
 Deno.test("get-product-config: login_methods block with signup settings and country rules only for msisdn", async () => {
   await withFake(async (fake) => {
     seedProduct(fake);
-    fake.seed("backoffice.bo_product_login_methods", [
+    fake.seed("backoffice.product_login_methods", [
       { product_id: PRODUCT, environment: "staging", type: "google", enabled: true, is_default: false, display_order: 20, config: { app_id: "g-1" } },
       { product_id: PRODUCT, environment: "staging", type: "msisdn", enabled: true, is_default: true, display_order: 10, config: { mode: "password", password_format: "numeric", pin_length: 6 } },
       { product_id: PRODUCT, environment: "production", type: "apple", enabled: true, is_default: false, display_order: 0, config: {} },
     ]);
-    fake.seed("backoffice.bo_product_signup_settings", [
+    fake.seed("backoffice.product_signup_settings", [
       { product_id: PRODUCT, environment: "staging", enabled: true, signup_url: "/register" },
     ]);
     const block = (await call(base)).body.login_methods as { signup: Row; methods: Row[] };
@@ -189,9 +193,9 @@ Deno.test("get-product-config: login_methods block with signup settings and coun
     assertEquals("allow_signup" in methods[0], false);
 
     // A product without rows: signup disabled, no methods, no service fallback.
-    fake.seed("backoffice.bo_product_login_methods", []);
-    fake.seed("backoffice.bo_product_signup_settings", []);
-    fake.seed("backoffice.bo_service_login_methods_defaults", [
+    fake.seed("backoffice.product_login_methods", []);
+    fake.seed("backoffice.product_signup_settings", []);
+    fake.seed("backoffice.service_login_methods_defaults", [
       { service_id: SERVICE, environment: "staging", method_key: "msisdn_pin", enabled: true, display_order: 0, config: {} },
     ]);
     assertEquals((await call(base)).body.login_methods, { signup: { enabled: false, url: null }, methods: [] });
@@ -202,18 +206,18 @@ Deno.test("get-product-config: assets merge service < product < language, stagin
   await withFake(async (fake) => {
     seedProduct(fake);
     const asset = (key: string, url: string, extra: Row) => ({ asset_key: key, url, mime_type: "image/png", metadata: {}, ...extra });
-    fake.seed("backoffice.bo_service_assets_defaults", [
+    fake.seed("backoffice.service_assets_defaults", [
       asset("logo", "svc-logo", { service_id: SERVICE, environment: "staging" }),
       asset("bg", "svc-bg", { service_id: SERVICE, environment: "staging" }),
       asset("icon", "svc-icon", { service_id: SERVICE, environment: "staging" }),
       asset("empty", "  ", { service_id: SERVICE, environment: "staging" }),
     ]);
-    fake.seed("backoffice.bo_product_level_assets", [
+    fake.seed("backoffice.product_level_assets", [
       asset("logo", "prod-logo", { product_id: PRODUCT, environment: "staging" }),
       asset("bg", "prod-bg", { product_id: PRODUCT, environment: "staging" }),
       asset("splash", "prod-splash", { product_id: PRODUCT, environment: "production" }),
     ]);
-    fake.seed("backoffice.bo_product_assets", [asset("bg", "loc-bg", { product_locale_id: LOC_IT, environment: "staging" })]);
+    fake.seed("backoffice.product_assets", [asset("bg", "loc-bg", { product_locale_id: LOC_IT, environment: "staging" })]);
 
     const urls = (assets: unknown) => Object.fromEntries(Object.entries(assets as Record<string, Row>).map(([k, v]) => [k, v.url]));
     assertEquals(urls((await call(base)).body.assets), { logo: "prod-logo", bg: "loc-bg", icon: "svc-icon" });
@@ -233,7 +237,7 @@ Deno.test("get-product-config: menu items from Service, Product and Language row
       route: null, external_url: null, auth_required: false, label_i18n_key: null, feature_flag: null, badge_text: null,
       badge_i18n_key: null, badge_color: null, min_app_version: null, max_app_version: null, screen_slug: null, ...owner, ...extra,
     });
-    fake.seed("backoffice.bo_product_menu_items", [
+    fake.seed("backoffice.product_menu_items", [
       item("s-home", { service_id: SERVICE }, "home", 0, { label: "Service home" }),
       item("p-home", { product_id: PRODUCT }, "home", 0, { label: "Product home", screen_slug: "home" }),
       item("s-vip", { service_id: SERVICE }, "vip", 1),
@@ -245,7 +249,7 @@ Deno.test("get-product-config: menu items from Service, Product and Language row
       item("en-only", { product_locale_id: LOC_EN }, "en", 0),
       item("other-svc", { service_id: "svc-2" }, "other", 0),
     ]);
-    fake.seed("backoffice.bo_product_menu_item_tiers", [
+    fake.seed("backoffice.product_menu_item_tiers", [
       { menu_item_id: "p-home", tier: "guest", visible: true, enabled: false, locked_action: "login", route: null, external_url: null, label: null, label_i18n_key: null, badge_text: null, badge_i18n_key: null, badge_color: null, display_order: 0, screen_slug: "login" },
     ]);
     const items = (await call(base)).body.menu_items as Row[];
@@ -262,7 +266,7 @@ Deno.test("get-product-config: page behaviour merges Service > Product > Languag
   await withFake(async (fake) => {
     seedProduct(fake);
     const env = { environment: "staging", label: null, service_id: null, product_id: null, product_locale_id: null };
-    fake.seed("backoffice.bo_page_behaviour_rules", [
+    fake.seed("backoffice.page_behaviour_rules", [
       { ...env, id: "s-games", service_id: SERVICE, path: "/games", position: 1, enabled: true },
       { ...env, id: "p-games", product_id: PRODUCT, path: "/games", position: 1, enabled: true, label: "Games" },
       { ...env, id: "s-vip", service_id: SERVICE, path: "/vip", position: 0, enabled: true },
@@ -272,7 +276,7 @@ Deno.test("get-product-config: page behaviour merges Service > Product > Languag
       { ...env, id: "other-svc", service_id: "svc-2", path: "/other", position: 0, enabled: true },
       { ...env, id: "prod-env", service_id: SERVICE, path: "/prod", position: 0, enabled: true, environment: "production" },
     ]);
-    fake.seed("backoffice.bo_page_behaviour_tier_rules", [
+    fake.seed("backoffice.page_behaviour_tier_rules", [
       { rule_id: "s-games", tier: "guest", action: "redirect", redirect_url: "/service", screen_slug: null },
       { rule_id: "p-games", tier: "guest", action: "redirect", redirect_url: "/login", screen_slug: null },
       { rule_id: "p-games", tier: "free", action: "screen", redirect_url: null, screen_slug: "upsell" },

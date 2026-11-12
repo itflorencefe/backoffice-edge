@@ -40,7 +40,7 @@ const MENU_TIER_COLUMNS = "tier, visible, enabled, locked_action, route, externa
 
 // Copies the menu items owned by one level (with their per-tier rules) onto the cloned owner.
 // Rows materialised from the starter menu levels (source_item_id set) are skipped: the
-// bo_products / bo_product_locales seed triggers recreate them for the clone.
+// products / product_locales seed triggers recreate them for the clone.
 async function cloneMenuItems(
   // deno-lint-ignore no-explicit-any
   admin: any,
@@ -49,7 +49,13 @@ async function cloneMenuItems(
   targetId: string,
 ): Promise<number> {
   try {
-    const { data: items, error } = await admin.schema("backoffice").from("bo_product_menu_items").select(MENU_ITEM_COLUMNS).eq(column, sourceId).is("source_item_id", null);
+    const read = (skipMaterialised: boolean) => {
+      const q = admin.schema("backoffice").from("product_menu_items").select(MENU_ITEM_COLUMNS).eq(column, sourceId);
+      return skipMaterialised ? q.is("source_item_id", null) : q;
+    };
+    let { data: items, error } = await read(true);
+    // Databases without the starter menu levels (BBM schema) have no source_item_id: nothing to skip.
+    if (error?.code === "42703") ({ data: items, error } = await read(false));
     if (error || !items) {
       if (error) console.error("[error] clone-service: menu items read failed", error.message);
       return 0;
@@ -58,7 +64,7 @@ async function cloneMenuItems(
     for (const item of items) {
       const { id: srcId, ...fields } = item;
       const { data: newItem, error: insErr } = await admin.schema("backoffice")
-        .from("bo_product_menu_items")
+        .from("product_menu_items")
         .insert({ ...fields, [column]: targetId })
         .select("id")
         .single();
@@ -66,9 +72,9 @@ async function cloneMenuItems(
         console.warn("[warning] clone-service: menu item copy skipped", item.item_key, insErr?.message);
         continue;
       }
-      const { data: tiers } = await admin.schema("backoffice").from("bo_product_menu_item_tiers").select(MENU_TIER_COLUMNS).eq("menu_item_id", srcId);
+      const { data: tiers } = await admin.schema("backoffice").from("product_menu_item_tiers").select(MENU_TIER_COLUMNS).eq("menu_item_id", srcId);
       if (tiers && tiers.length > 0) {
-        const { error: tierErr } = await admin.schema("backoffice").from("bo_product_menu_item_tiers")
+        const { error: tierErr } = await admin.schema("backoffice").from("product_menu_item_tiers")
           .insert(tiers.map((t: Record<string, unknown>) => ({ ...t, menu_item_id: newItem.id })));
         if (tierErr) console.error("[error] clone-service: menu item tiers copy failed", item.item_key, tierErr.message);
       }
@@ -90,8 +96,12 @@ async function copyRows(
   column: "service_id" | "product_id" | "product_locale_id",
   sourceId: string,
   targetId: string,
+  /** Columns copied only when the database has them (edge-only columns, absent in the BBM schema). */
+  optionalColumns?: string,
 ): Promise<void> {
-  const { data: rows, error: readErr } = await admin.schema("backoffice").from(table).select(columns).eq(column, sourceId);
+  const read = (cols: string) => admin.schema("backoffice").from(table).select(cols).eq(column, sourceId);
+  let { data: rows, error: readErr } = await read(optionalColumns ? `${columns}, ${optionalColumns}` : columns);
+  if (readErr?.code === "42703" && optionalColumns) ({ data: rows, error: readErr } = await read(columns));
   if (readErr) {
     console.error(`[error] clone-service: ${table} read failed`, readErr.message);
     return;
@@ -134,7 +144,7 @@ Deno.serve(async (req)=>{
         error: "Unauthorized"
       }, 401);
     }
-    const { data: boUser } = await supabaseAdmin.schema("backoffice").from("bo_backoffice_users").select("role").eq("user_id", user.id).eq("is_active", true).maybeSingle();
+    const { data: boUser } = await supabaseAdmin.schema("backoffice").from("backoffice_users").select("role").eq("user_id", user.id).eq("is_active", true).maybeSingle();
     if (!boUser || boUser.role !== "editor" && boUser.role !== "admin") {
       return jsonResponse({
         ok: false,
@@ -150,7 +160,7 @@ Deno.serve(async (req)=>{
       }, 400);
     }
     // 1. Fetch source service
-    const { data: source, error: srcErr } = await supabaseAdmin.schema("backoffice").from("bo_services").select("*").eq("id", source_service_id).eq("status", "active").maybeSingle();
+    const { data: source, error: srcErr } = await supabaseAdmin.schema("backoffice").from("services").select("*").eq("id", source_service_id).eq("status", "active").maybeSingle();
     if (srcErr) return jsonResponse({
       ok: false,
       error: srcErr.message
@@ -160,7 +170,7 @@ Deno.serve(async (req)=>{
       error: "Source service not found or not active"
     }, 404);
     // 2. Create new service
-    const { data: newService, error: newSvcErr } = await supabaseAdmin.schema("backoffice").from("bo_services").insert({
+    const { data: newService, error: newSvcErr } = await supabaseAdmin.schema("backoffice").from("services").insert({
       slug: new_slug,
       display_name: new_display_name,
       description: source.description,
@@ -171,15 +181,16 @@ Deno.serve(async (req)=>{
       error: newSvcErr.message
     }, 500);
     // 3. Clone service-level defaults (branding, assets, translations, config, flags, login methods, footer items).
-    // Service menu items are rows of bo_product_menu_items owned by the service (cloned below).
+    // Service menu items are rows of product_menu_items owned by the service (cloned below).
     const defaultTables = [
-      { table: "bo_service_branding_defaults", columns: "environment, colors, gradients, fonts, radius, spacing, font_sizes, font_weights, shadows" },
-      { table: "bo_service_assets_defaults", columns: "environment, asset_key, url, mime_type, metadata" },
-      { table: "bo_service_translations_defaults", columns: "environment, language_code, namespace, key, value" },
-      { table: "bo_service_public_config_defaults", columns: "environment, key, value, description" },
-      { table: "bo_service_feature_flags_defaults", columns: "environment, flag_key, enabled, description" },
-      { table: "bo_service_login_methods_defaults", columns: "environment, method_key, enabled, display_order, config" },
-      { table: "bo_service_footer_items_defaults", columns: "environment, item_key, label, url, icon, display_order, item_group, visible" },
+      { table: "service_branding_defaults", columns: "environment, colors, gradients, fonts, radius, spacing, font_sizes, font_weights, shadows" },
+      { table: "service_assets_defaults", columns: "environment, asset_key, url, mime_type, metadata" },
+      { table: "service_translations_defaults", columns: "environment, language_code, namespace, key, value" },
+      // Service-owned public config rows live in product_public_config (three owners).
+      { table: "product_public_config", columns: "environment, key, value, description" },
+      { table: "service_feature_flags_defaults", columns: "environment, flag_key, enabled, description" },
+      { table: "service_login_methods_defaults", columns: "environment, method_key, enabled, display_order, config" },
+      { table: "service_footer_items_defaults", columns: "environment, item_key, label, url, icon, display_order, item_group, visible" },
     ];
     for (const { table, columns } of defaultTables) {
       await copyRows(supabaseAdmin, table, columns, "service_id", source_service_id, newService.id);
@@ -187,11 +198,11 @@ Deno.serve(async (req)=>{
     let menuItemsCloned = await cloneMenuItems(supabaseAdmin, "service_id", source_service_id, newService.id);
     // 4. Clone products
     await clonePageBehaviour(supabaseAdmin, "service_id", source_service_id, newService.id);
-    const { data: sourceProducts } = await supabaseAdmin.schema("backoffice").from("bo_products").select("*").eq("service_id", source_service_id);
+    const { data: sourceProducts } = await supabaseAdmin.schema("backoffice").from("products").select("*").eq("service_id", source_service_id);
     let productsCloned = 0;
     let localesCloned = 0;
     for (const srcProduct of sourceProducts || []){
-      const { data: newProduct, error: prodErr } = await supabaseAdmin.schema("backoffice").from("bo_products").insert({
+      const { data: newProduct, error: prodErr } = await supabaseAdmin.schema("backoffice").from("products").insert({
         service_id: newService.id,
         slug: srcProduct.slug,
         display_name: srcProduct.display_name,
@@ -206,14 +217,14 @@ Deno.serve(async (req)=>{
       productsCloned++;
       // If this was the global product, update the reference
       if (source.global_product_id === srcProduct.id) {
-        await supabaseAdmin.schema("backoffice").from("bo_services").update({
+        await supabaseAdmin.schema("backoffice").from("services").update({
           global_product_id: newProduct.id
         }).eq("id", newService.id);
       }
       // Clone content consumption rules for this product
-      const { data: consumptionRules } = await supabaseAdmin.schema("backoffice").from("bo_product_content_consumption_rules").select("environment, content_type, tier, action, rate_limit_enabled, tries_limit, frequency_period, frequency_unit_count, on_limit_reached_action").eq("product_id", srcProduct.id);
+      const { data: consumptionRules } = await supabaseAdmin.schema("backoffice").from("product_content_consumption_rules").select("environment, content_type, tier, action, rate_limit_enabled, tries_limit, frequency_period, frequency_unit_count, on_limit_reached_action").eq("product_id", srcProduct.id);
       if (consumptionRules && consumptionRules.length > 0) {
-        await supabaseAdmin.schema("backoffice").from("bo_product_content_consumption_rules").upsert(consumptionRules.map((r)=>({
+        await supabaseAdmin.schema("backoffice").from("product_content_consumption_rules").upsert(consumptionRules.map((r)=>({
             ...r,
             product_id: newProduct.id
           })), {
@@ -222,11 +233,11 @@ Deno.serve(async (req)=>{
         });
       }
       // Login methods and signup settings (product level, both environments)
-      const { data: loginMethods, error: loginReadErr } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").select("environment, type, enabled, is_default, display_order, label_i18n_key, icon, feature_flag, min_app_version, max_app_version, config").eq("product_id", srcProduct.id);
+      const { data: loginMethods, error: loginReadErr } = await supabaseAdmin.schema("backoffice").from("product_login_methods").select("environment, type, enabled, is_default, display_order, label_i18n_key, icon, feature_flag, min_app_version, max_app_version, config").eq("product_id", srcProduct.id);
       if (loginReadErr) {
         console.error("[error] clone-service: login methods read failed", loginReadErr.message);
       } else if (loginMethods && loginMethods.length > 0) {
-        const { error: loginWriteErr } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").upsert(loginMethods.map((m)=>({
+        const { error: loginWriteErr } = await supabaseAdmin.schema("backoffice").from("product_login_methods").upsert(loginMethods.map((m)=>({
             ...m,
             product_id: newProduct.id
           })), {
@@ -235,11 +246,11 @@ Deno.serve(async (req)=>{
         });
         if (loginWriteErr) console.error("[error] clone-service: login methods copy failed", loginWriteErr.message);
       }
-      const { data: signupRows, error: signupReadErr } = await supabaseAdmin.schema("backoffice").from("bo_product_signup_settings").select("environment, enabled, signup_url").eq("product_id", srcProduct.id);
+      const { data: signupRows, error: signupReadErr } = await supabaseAdmin.schema("backoffice").from("product_signup_settings").select("environment, enabled, signup_url").eq("product_id", srcProduct.id);
       if (signupReadErr) {
         console.error("[error] clone-service: signup settings read failed", signupReadErr.message);
       } else if (signupRows && signupRows.length > 0) {
-        const { error: signupWriteErr } = await supabaseAdmin.schema("backoffice").from("bo_product_signup_settings").upsert(signupRows.map((s)=>({
+        const { error: signupWriteErr } = await supabaseAdmin.schema("backoffice").from("product_signup_settings").upsert(signupRows.map((s)=>({
             ...s,
             product_id: newProduct.id,
             updated_by: user.id
@@ -249,11 +260,11 @@ Deno.serve(async (req)=>{
       await clonePageBehaviour(supabaseAdmin, "product_id", srcProduct.id, newProduct.id);
       menuItemsCloned += await cloneMenuItems(supabaseAdmin, "product_id", srcProduct.id, newProduct.id);
       // Product-level assets keep the source file URLs (files are shared, not copied).
-      await copyRows(supabaseAdmin, "bo_product_level_assets", "environment, asset_key, url, mime_type, metadata", "product_id", srcProduct.id, newProduct.id);
+      await copyRows(supabaseAdmin, "product_level_assets", "environment, asset_key, url, mime_type, metadata", "product_id", srcProduct.id, newProduct.id);
       // Clone locales for this product
-      const { data: sourceLocales } = await supabaseAdmin.schema("backoffice").from("bo_product_locales").select("*").eq("product_id", srcProduct.id);
+      const { data: sourceLocales } = await supabaseAdmin.schema("backoffice").from("product_locales").select("*").eq("product_id", srcProduct.id);
       for (const srcLocale of sourceLocales || []){
-        const { data: newLocale, error: locErr } = await supabaseAdmin.schema("backoffice").from("bo_product_locales").insert({
+        const { data: newLocale, error: locErr } = await supabaseAdmin.schema("backoffice").from("product_locales").insert({
           product_id: newProduct.id,
           language_code: srcLocale.language_code,
           display_name: srcLocale.display_name,
@@ -266,15 +277,15 @@ Deno.serve(async (req)=>{
         menuItemsCloned += await cloneMenuItems(supabaseAdmin, "product_locale_id", srcLocale.id, newLocale.id);
         // Clone locale-level data
         const localeTables = [
-          { table: "bo_product_branding", columns: "environment, colors, gradients, fonts, radius, spacing, font_sizes, font_weights, shadows" },
-          { table: "bo_product_assets", columns: "environment, asset_key, url, mime_type, width, height, metadata" },
-          { table: "bo_product_translations", columns: "environment, namespace, key, value" },
-          { table: "bo_product_public_config", columns: "environment, key, value, description" },
-          { table: "bo_product_feature_flags", columns: "environment, flag_key, enabled, description" },
-          { table: "bo_product_footer_items", columns: "environment, item_key, label, url, icon, display_order, item_group, visible, link_type, document_slug" },
+          { table: "product_branding", columns: "environment, colors, gradients, fonts, radius, spacing, font_sizes, font_weights, shadows" },
+          { table: "product_assets", columns: "environment, asset_key, url, mime_type, metadata" },
+          { table: "product_translations", columns: "environment, namespace, key, value" },
+          { table: "product_public_config", columns: "environment, key, value, description" },
+          { table: "product_feature_flags", columns: "environment, flag_key, enabled, description" },
+          { table: "product_footer_items", columns: "environment, item_key, label, url, icon, display_order, item_group, visible", optional: "link_type, document_slug" },
         ];
-        for (const { table, columns } of localeTables) {
-          await copyRows(supabaseAdmin, table, columns, "product_locale_id", srcLocale.id, newLocale.id);
+        for (const { table, columns, optional } of localeTables as { table: string; columns: string; optional?: string }[]) {
+          await copyRows(supabaseAdmin, table, columns, "product_locale_id", srcLocale.id, newLocale.id, optional);
         }
       }
     }

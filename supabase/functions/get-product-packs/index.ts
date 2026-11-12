@@ -85,7 +85,7 @@ export const handleRequest = createHandler(async (productId) => {
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !key) throw new Error("Supabase server credentials not configured");
   const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { data, error } = await supabase.schema("backoffice").from("bo_product_packs")
+  const { data, error } = await supabase.schema("backoffice").from("product_packs")
     .select("productId, packId, packName, value, labels, offerId, price, currency")
     .eq("productId", productId)
     .order("sortOrder").order("packId");

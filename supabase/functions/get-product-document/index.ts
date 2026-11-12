@@ -41,7 +41,7 @@ Deno.serve(async (req)=>{
     }
     const supabase = createClient(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
     // Resolve product
-    const { data: product, error: prodErr } = await supabase.schema("backoffice").from("bo_products").select("id").eq("slug", productSlug).eq("status", "active").maybeSingle();
+    const { data: product, error: prodErr } = await supabase.schema("backoffice").from("products").select("id").eq("slug", productSlug).eq("status", "active").maybeSingle();
     if (prodErr) return jsonResponse({
       ok: false,
       error: prodErr.message
@@ -51,7 +51,7 @@ Deno.serve(async (req)=>{
       error: "Product not found"
     }, 404);
     // Resolve available locales for fallback
-    const { data: allLocales } = await supabase.schema("backoffice").from("bo_product_locales").select("language_code, is_default").eq("product_id", product.id).eq("status", "active").order("is_default", {
+    const { data: allLocales } = await supabase.schema("backoffice").from("product_locales").select("language_code, is_default").eq("product_id", product.id).eq("status", "active").order("is_default", {
       ascending: false
     });
     const locales = allLocales || [];
@@ -60,7 +60,7 @@ Deno.serve(async (req)=>{
     const defaultLocale = locales.find((l)=>l.is_default) || locales[0];
     const resolvedLocale = hasRequestedLocale ? requestedLocale : defaultLocale?.language_code || requestedLocale;
     // Fetch the document using resolved locale
-    const { data: doc, error: docErr } = await supabase.schema("backoffice").from("bo_product_documents").select("id, slug, path, title, locale, updated_at, current_version_id").eq("product_id", product.id).eq("slug", documentSlug).eq("locale", resolvedLocale).eq("environment", environment).eq("status", "published").maybeSingle();
+    const { data: doc, error: docErr } = await supabase.schema("backoffice").from("product_documents").select("id, slug, path, title, locale, updated_at, current_version_id").eq("product_id", product.id).eq("slug", documentSlug).eq("locale", resolvedLocale).eq("environment", environment).eq("status", "published").maybeSingle();
     if (docErr) return jsonResponse({
       ok: false,
       error: docErr.message
@@ -73,7 +73,7 @@ Deno.serve(async (req)=>{
     let version = 1;
     let bodyHtml = "";
     if (doc.current_version_id) {
-      const { data: ver } = await supabase.schema("backoffice").from("bo_product_document_versions").select("version, body_html").eq("id", doc.current_version_id).maybeSingle();
+      const { data: ver } = await supabase.schema("backoffice").from("product_document_versions").select("version, body_html").eq("id", doc.current_version_id).maybeSingle();
       if (ver) {
         version = ver.version;
         bodyHtml = ver.body_html;

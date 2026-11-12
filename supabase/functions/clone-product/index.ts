@@ -79,7 +79,7 @@ function renameMenuRefs<T extends Record<string, unknown>>(row: T, pair: Namespa
 
 // Copies the menu items owned by one level (with their per-tier rules) onto the cloned owner.
 // Rows materialised from the starter menu levels (source_item_id set) are skipped: the
-// bo_products / bo_product_locales seed triggers recreate them for the clone.
+// products / product_locales seed triggers recreate them for the clone.
 async function cloneMenuItems(
   // deno-lint-ignore no-explicit-any
   admin: any,
@@ -89,7 +89,13 @@ async function cloneMenuItems(
   pair: NamespacePair,
 ): Promise<number> {
   try {
-    const { data: items, error } = await admin.schema("backoffice").from("bo_product_menu_items").select(MENU_ITEM_COLUMNS).eq(column, sourceId).is("source_item_id", null);
+    const read = (skipMaterialised: boolean) => {
+      const q = admin.schema("backoffice").from("product_menu_items").select(MENU_ITEM_COLUMNS).eq(column, sourceId);
+      return skipMaterialised ? q.is("source_item_id", null) : q;
+    };
+    let { data: items, error } = await read(true);
+    // Databases without the starter menu levels (BBM schema) have no source_item_id: nothing to skip.
+    if (error?.code === "42703") ({ data: items, error } = await read(false));
     if (error || !items) {
       if (error) console.error("[error] clone-product: menu items read failed", error.message);
       return 0;
@@ -98,7 +104,7 @@ async function cloneMenuItems(
     for (const item of items) {
       const { id: srcId, ...fields } = item;
       const { data: newItem, error: insErr } = await admin.schema("backoffice")
-        .from("bo_product_menu_items")
+        .from("product_menu_items")
         .insert({ ...renameMenuRefs(fields, pair), [column]: targetId })
         .select("id")
         .single();
@@ -106,9 +112,9 @@ async function cloneMenuItems(
         console.warn("[warning] clone-product: menu item copy skipped", item.item_key, insErr?.message);
         continue;
       }
-      const { data: tiers } = await admin.schema("backoffice").from("bo_product_menu_item_tiers").select(MENU_TIER_COLUMNS).eq("menu_item_id", srcId);
+      const { data: tiers } = await admin.schema("backoffice").from("product_menu_item_tiers").select(MENU_TIER_COLUMNS).eq("menu_item_id", srcId);
       if (tiers && tiers.length > 0) {
-        const { error: tierErr } = await admin.schema("backoffice").from("bo_product_menu_item_tiers")
+        const { error: tierErr } = await admin.schema("backoffice").from("product_menu_item_tiers")
           .insert(tiers.map((t: Record<string, unknown>) => ({ ...renameMenuRefs(t, pair), menu_item_id: newItem.id })));
         if (tierErr) console.error("[error] clone-product: menu item tiers copy failed", item.item_key, tierErr.message);
       }
@@ -132,7 +138,7 @@ async function cloneAppScreens(
   const pairs: NamespacePair[] = [];
   try {
     const { data: screens, error } = await admin
-      .schema("backoffice").from("bo_app_screens")
+      .schema("backoffice").from("app_screens")
       .select("id, environment, slug, name, enabled")
       .eq(column, sourceId);
     if (error || !screens) return { cloned: 0, pairs };
@@ -140,14 +146,14 @@ async function cloneAppScreens(
     let cloned = 0;
     for (const s of screens) {
       const { data: newScreen, error: insErr } = await admin
-        .schema("backoffice").from("bo_app_screens")
+        .schema("backoffice").from("app_screens")
         .insert({ [column]: targetId, environment: s.environment, slug: s.slug, name: s.name, enabled: s.enabled })
         .select("id")
         .single();
       if (insErr || !newScreen) continue;
 
       const { data: sections } = await admin
-        .schema("backoffice").from("bo_app_screen_sections")
+        .schema("backoffice").from("app_screen_sections")
         .select("platform, widget_type, title, show_title, enabled, position, col_span, config, start_at_local, end_at_local, visible_to")
         .eq("screen_id", s.id);
 
@@ -159,9 +165,9 @@ async function cloneAppScreens(
           config: renameNamespace((sec.config ?? {}) as Record<string, unknown>, pair),
           screen_id: newScreen.id,
         }));
-        const { error: secErr } = await admin.schema("backoffice").from("bo_app_screen_sections").insert(rows);
+        const { error: secErr } = await admin.schema("backoffice").from("app_screen_sections").insert(rows);
         if (secErr) {
-          await admin.schema("backoffice").from("bo_app_screens").delete().eq("id", newScreen.id);
+          await admin.schema("backoffice").from("app_screens").delete().eq("id", newScreen.id);
           continue;
         }
         pairs.push(pair);
@@ -184,18 +190,18 @@ async function copyRekeyedTexts(
   const pairs = [...new Map(allPairs.filter((p) => p.from !== p.to).map((p) => [p.from, p])).values()];
   for (const p of pairs) {
     const { data: svcRows } = await admin
-      .schema("backoffice").from("bo_service_translations_defaults")
+      .schema("backoffice").from("service_translations_defaults")
       .select("environment, language_code, key, value")
       .eq("service_id", serviceId)
       .eq("namespace", p.from);
     if (svcRows && svcRows.length > 0) {
-      await admin.schema("backoffice").from("bo_service_translations_defaults").upsert(
+      await admin.schema("backoffice").from("service_translations_defaults").upsert(
         svcRows.map((r: Record<string, string>) => ({ ...r, service_id: serviceId, namespace: p.to })),
         { onConflict: "service_id,environment,language_code,namespace,key", ignoreDuplicates: true },
       );
     }
     if (newLocaleIds.length > 0) {
-      await admin.schema("backoffice").from("bo_product_translations")
+      await admin.schema("backoffice").from("product_translations")
         .update({ namespace: p.to })
         .in("product_locale_id", newLocaleIds)
         .eq("namespace", p.from);
@@ -238,7 +244,7 @@ Deno.serve(async (req)=>{
       }, 401);
     }
     // Check that the user is at least an editor
-    const { data: boUser } = await supabaseAdmin.schema("backoffice").from("bo_backoffice_users").select("role").eq("user_id", user.id).eq("is_active", true).maybeSingle();
+    const { data: boUser } = await supabaseAdmin.schema("backoffice").from("backoffice_users").select("role").eq("user_id", user.id).eq("is_active", true).maybeSingle();
     if (!boUser || boUser.role !== "editor" && boUser.role !== "admin") {
       return jsonResponse({
         ok: false,
@@ -254,7 +260,7 @@ Deno.serve(async (req)=>{
       }, 400);
     }
     // 1. Fetch source product
-    const { data: source, error: srcErr } = await supabaseAdmin.schema("backoffice").from("bo_products").select("*").eq("id", source_product_id).maybeSingle();
+    const { data: source, error: srcErr } = await supabaseAdmin.schema("backoffice").from("products").select("*").eq("id", source_product_id).maybeSingle();
     if (srcErr) return jsonResponse({
       ok: false,
       error: srcErr.message
@@ -264,7 +270,7 @@ Deno.serve(async (req)=>{
       error: "Source product not found"
     }, 404);
     // 2. Create new product (copy timezone so schedules keep the same zone)
-    const { data: newProduct, error: newProdErr } = await supabaseAdmin.schema("backoffice").from("bo_products").insert({
+    const { data: newProduct, error: newProdErr } = await supabaseAdmin.schema("backoffice").from("products").insert({
       service_id: source.service_id,
       slug: new_slug,
       display_name: new_display_name,
@@ -283,15 +289,15 @@ Deno.serve(async (req)=>{
     // Clone login methods (product level, both environments). New products start with no login
     // method; the delete only clears rows seeded by an older trigger, and runs only once the
     // source rows were read (a failure keeps them and is logged).
-    const { data: loginMethods, error: loginReadErr } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").select("environment, type, enabled, is_default, display_order, label_i18n_key, icon, feature_flag, min_app_version, max_app_version, config, updated_by").eq("product_id", source_product_id);
+    const { data: loginMethods, error: loginReadErr } = await supabaseAdmin.schema("backoffice").from("product_login_methods").select("environment, type, enabled, is_default, display_order, label_i18n_key, icon, feature_flag, min_app_version, max_app_version, config, updated_by").eq("product_id", source_product_id);
     if (loginReadErr) {
       console.error("[error] clone-product: login methods read failed", loginReadErr.message);
     } else if (loginMethods && loginMethods.length > 0) {
-      const { error: loginDelErr } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").delete().eq("product_id", newProduct.id);
+      const { error: loginDelErr } = await supabaseAdmin.schema("backoffice").from("product_login_methods").delete().eq("product_id", newProduct.id);
       if (loginDelErr) {
         console.error("[error] clone-product: clearing seeded login methods failed", loginDelErr.message);
       } else {
-        const { error: loginWriteErr } = await supabaseAdmin.schema("backoffice").from("bo_product_login_methods").insert(loginMethods.map((m)=>({
+        const { error: loginWriteErr } = await supabaseAdmin.schema("backoffice").from("product_login_methods").insert(loginMethods.map((m)=>({
             ...m,
             product_id: newProduct.id
           })));
@@ -299,11 +305,11 @@ Deno.serve(async (req)=>{
       }
     }
     // Signup settings (product level, both environments)
-    const { data: signupRows, error: signupReadErr } = await supabaseAdmin.schema("backoffice").from("bo_product_signup_settings").select("environment, enabled, signup_url").eq("product_id", source_product_id);
+    const { data: signupRows, error: signupReadErr } = await supabaseAdmin.schema("backoffice").from("product_signup_settings").select("environment, enabled, signup_url").eq("product_id", source_product_id);
     if (signupReadErr) {
       console.error("[error] clone-product: signup settings read failed", signupReadErr.message);
     } else if (signupRows && signupRows.length > 0) {
-      const { error: signupWriteErr } = await supabaseAdmin.schema("backoffice").from("bo_product_signup_settings").upsert(signupRows.map((s)=>({
+      const { error: signupWriteErr } = await supabaseAdmin.schema("backoffice").from("product_signup_settings").upsert(signupRows.map((s)=>({
           ...s,
           product_id: newProduct.id,
           updated_by: user.id
@@ -311,11 +317,11 @@ Deno.serve(async (req)=>{
       if (signupWriteErr) console.error("[error] clone-product: signup settings copy failed", signupWriteErr.message);
     }
     // Product-level assets keep the source file URLs (files are shared, not copied).
-    const { data: productAssets, error: productAssetsReadErr } = await supabaseAdmin.schema("backoffice").from("bo_product_level_assets").select("environment, asset_key, url, mime_type, metadata").eq("product_id", source_product_id);
+    const { data: productAssets, error: productAssetsReadErr } = await supabaseAdmin.schema("backoffice").from("product_level_assets").select("environment, asset_key, url, mime_type, metadata").eq("product_id", source_product_id);
     if (productAssetsReadErr) {
       console.error("[error] clone-product: product assets read failed", productAssetsReadErr.message);
     } else if (productAssets && productAssets.length > 0) {
-      const { error: productAssetsWriteErr } = await supabaseAdmin.schema("backoffice").from("bo_product_level_assets").insert(productAssets.map((a)=>({
+      const { error: productAssetsWriteErr } = await supabaseAdmin.schema("backoffice").from("product_level_assets").insert(productAssets.map((a)=>({
           ...a,
           product_id: newProduct.id
         })));
@@ -325,7 +331,7 @@ Deno.serve(async (req)=>{
     await clonePageBehaviour(supabaseAdmin, "product_id", source_product_id, newProduct.id);
     // 3. Fetch source locales
     const { data: sourceLocales } = await supabaseAdmin
-      .schema("backoffice").from("bo_product_locales")
+      .schema("backoffice").from("product_locales")
       .select("*")
       .eq("product_id", source_product_id);
 
@@ -352,7 +358,7 @@ Deno.serve(async (req)=>{
     let localesCloned = 0;
     for (const srcLocale of sourceLocales){
       // Create new locale
-      const { data: newLocale, error: locErr } = await supabaseAdmin.schema("backoffice").from("bo_product_locales").insert({
+      const { data: newLocale, error: locErr } = await supabaseAdmin.schema("backoffice").from("product_locales").insert({
         product_id: newProduct.id,
         language_code: srcLocale.language_code,
         display_name: srcLocale.display_name,
@@ -361,41 +367,41 @@ Deno.serve(async (req)=>{
       }).select().single();
       if (locErr || !newLocale) continue;
       // Clone branding (both environments)
-      const { data: brandings } = await supabaseAdmin.schema("backoffice").from("bo_product_branding").select("environment, colors, gradients, fonts, radius, spacing, font_sizes, font_weights, shadows").eq("product_locale_id", srcLocale.id);
+      const { data: brandings } = await supabaseAdmin.schema("backoffice").from("product_branding").select("environment, colors, gradients, fonts, radius, spacing, font_sizes, font_weights, shadows").eq("product_locale_id", srcLocale.id);
       if (brandings && brandings.length > 0) {
-        await supabaseAdmin.schema("backoffice").from("bo_product_branding").insert(brandings.map((b)=>({
+        await supabaseAdmin.schema("backoffice").from("product_branding").insert(brandings.map((b)=>({
             ...b,
             product_locale_id: newLocale.id
           })));
       }
       // Clone assets
-      const { data: assets } = await supabaseAdmin.schema("backoffice").from("bo_product_assets").select("environment, asset_key, url, mime_type, width, height, metadata").eq("product_locale_id", srcLocale.id);
+      const { data: assets } = await supabaseAdmin.schema("backoffice").from("product_assets").select("environment, asset_key, url, mime_type, metadata").eq("product_locale_id", srcLocale.id);
       if (assets && assets.length > 0) {
-        await supabaseAdmin.schema("backoffice").from("bo_product_assets").insert(assets.map((a)=>({
+        await supabaseAdmin.schema("backoffice").from("product_assets").insert(assets.map((a)=>({
             ...a,
             product_locale_id: newLocale.id
           })));
       }
       // Clone translations
-      const { data: translations } = await supabaseAdmin.schema("backoffice").from("bo_product_translations").select("environment, namespace, key, value").eq("product_locale_id", srcLocale.id);
+      const { data: translations } = await supabaseAdmin.schema("backoffice").from("product_translations").select("environment, namespace, key, value").eq("product_locale_id", srcLocale.id);
       if (translations && translations.length > 0) {
-        await supabaseAdmin.schema("backoffice").from("bo_product_translations").insert(translations.map((t)=>({
+        await supabaseAdmin.schema("backoffice").from("product_translations").insert(translations.map((t)=>({
             ...t,
             product_locale_id: newLocale.id
           })));
       }
       // Clone public config
-      const { data: configs } = await supabaseAdmin.schema("backoffice").from("bo_product_public_config").select("environment, key, value, description").eq("product_locale_id", srcLocale.id);
+      const { data: configs } = await supabaseAdmin.schema("backoffice").from("product_public_config").select("environment, key, value, description").eq("product_locale_id", srcLocale.id);
       if (configs && configs.length > 0) {
-        await supabaseAdmin.schema("backoffice").from("bo_product_public_config").insert(configs.map((c)=>({
+        await supabaseAdmin.schema("backoffice").from("product_public_config").insert(configs.map((c)=>({
             ...c,
             product_locale_id: newLocale.id
           })));
       }
       // Clone feature flags
-      const { data: flags } = await supabaseAdmin.schema("backoffice").from("bo_product_feature_flags").select("environment, flag_key, enabled, description").eq("product_locale_id", srcLocale.id);
+      const { data: flags } = await supabaseAdmin.schema("backoffice").from("product_feature_flags").select("environment, flag_key, enabled, description").eq("product_locale_id", srcLocale.id);
       if (flags && flags.length > 0) {
-        await supabaseAdmin.schema("backoffice").from("bo_product_feature_flags").insert(flags.map((f)=>({
+        await supabaseAdmin.schema("backoffice").from("product_feature_flags").insert(flags.map((f)=>({
             ...f,
             product_locale_id: newLocale.id
           })));
@@ -403,9 +409,9 @@ Deno.serve(async (req)=>{
       await clonePageBehaviour(supabaseAdmin, "product_locale_id", srcLocale.id, newLocale.id);
       menuItemsCloned += await cloneMenuItems(supabaseAdmin, "product_locale_id", srcLocale.id, newLocale.id, menuPair);
       // Clone footer items
-      const { data: footerItems } = await supabaseAdmin.schema("backoffice").from("bo_product_footer_items").select("environment, item_key, label, url, icon, display_order, item_group, visible").eq("product_locale_id", srcLocale.id);
+      const { data: footerItems } = await supabaseAdmin.schema("backoffice").from("product_footer_items").select("environment, item_key, label, url, icon, display_order, item_group, visible").eq("product_locale_id", srcLocale.id);
       if (footerItems && footerItems.length > 0) {
-        await supabaseAdmin.schema("backoffice").from("bo_product_footer_items").insert(footerItems.map((m)=>({
+        await supabaseAdmin.schema("backoffice").from("product_footer_items").insert(footerItems.map((m)=>({
             ...m,
             product_locale_id: newLocale.id
           })));
@@ -422,17 +428,17 @@ Deno.serve(async (req)=>{
     await copyRekeyedTexts(supabaseAdmin, newProduct.service_id, newLocaleIds, textPairs);
 
     // Clone content consumption rules (product-level)
-    const { data: consumptionRules } = await supabaseAdmin.schema("backoffice").from("bo_product_content_consumption_rules").select("environment, content_type, tier, action, rate_limit_enabled, tries_limit, frequency_period, frequency_unit_count, on_limit_reached_action").eq("product_id", source_product_id);
+    const { data: consumptionRules } = await supabaseAdmin.schema("backoffice").from("product_content_consumption_rules").select("environment, content_type, tier, action, rate_limit_enabled, tries_limit, frequency_period, frequency_unit_count, on_limit_reached_action").eq("product_id", source_product_id);
     if (consumptionRules && consumptionRules.length > 0) {
-      await supabaseAdmin.schema("backoffice").from("bo_product_content_consumption_rules").insert(consumptionRules.map((r)=>({
+      await supabaseAdmin.schema("backoffice").from("product_content_consumption_rules").insert(consumptionRules.map((r)=>({
           ...r,
           product_id: newProduct.id
         })));
     }
     // Clone unsubscribe methods (product-level)
-    const { data: unsubMethods } = await supabaseAdmin.schema("backoffice").from("bo_product_unsubscribe_methods").select("environment, method, external_url, external_link_label, external_link_target, avoided_reason_i18n_key, config").eq("product_id", source_product_id);
+    const { data: unsubMethods } = await supabaseAdmin.schema("backoffice").from("product_unsubscribe_methods").select("environment, method, external_url, external_link_label, external_link_target, avoided_reason_i18n_key, config").eq("product_id", source_product_id);
     if (unsubMethods && unsubMethods.length > 0) {
-      await supabaseAdmin.schema("backoffice").from("bo_product_unsubscribe_methods").insert(unsubMethods.map((m)=>({
+      await supabaseAdmin.schema("backoffice").from("product_unsubscribe_methods").insert(unsubMethods.map((m)=>({
           ...m,
           product_id: newProduct.id
         })));

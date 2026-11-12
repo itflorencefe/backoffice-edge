@@ -32,7 +32,7 @@ export async function resolveProduct(
   if (params.domain) {
     const hostnameCol = env === "staging" ? "hostname_staging" : "hostname_production";
     const { data: product, error } = await supabase
-      .schema("backoffice").from("bo_products")
+      .schema("backoffice").from("products")
       .select("id, slug, display_name, country_code, native_bundle_id, hostname_staging, hostname_production, service_id")
       .eq(hostnameCol, params.domain)
       .eq("status", "active")
@@ -41,7 +41,7 @@ export async function resolveProduct(
     if (error) throw new Error(`Domain lookup failed: ${error.message}`);
     if (product) {
       const { data: svc } = await supabase
-        .schema("backoffice").from("bo_services")
+        .schema("backoffice").from("services")
         .select("id, slug, display_name")
         .eq("id", product.service_id)
         .single();
@@ -56,7 +56,7 @@ export async function resolveProduct(
   // Strategy 2: bundle_id + country_code
   if (params.bundle_id && params.country_code) {
     const { data: product, error } = await supabase
-      .schema("backoffice").from("bo_products")
+      .schema("backoffice").from("products")
       .select("id, slug, display_name, country_code, native_bundle_id, hostname_staging, hostname_production, service_id")
       .eq("native_bundle_id", params.bundle_id)
       .eq("country_code", params.country_code.toUpperCase())
@@ -66,7 +66,7 @@ export async function resolveProduct(
     if (error) throw new Error(`Bundle+country lookup failed: ${error.message}`);
     if (product) {
       const { data: svc } = await supabase
-        .schema("backoffice").from("bo_services")
+        .schema("backoffice").from("services")
         .select("id, slug, display_name")
         .eq("id", product.service_id)
         .single();
@@ -81,7 +81,7 @@ export async function resolveProduct(
   // Strategy 3: bundle_id only (default product for that bundle's service)
   if (params.bundle_id) {
     const { data: product, error } = await supabase
-      .schema("backoffice").from("bo_products")
+      .schema("backoffice").from("products")
       .select("id, slug, display_name, country_code, native_bundle_id, hostname_staging, hostname_production, service_id")
       .eq("native_bundle_id", params.bundle_id)
       .eq("is_default", true)
@@ -91,7 +91,7 @@ export async function resolveProduct(
     if (error) throw new Error(`Bundle default lookup failed: ${error.message}`);
     if (product) {
       const { data: svc } = await supabase
-        .schema("backoffice").from("bo_services")
+        .schema("backoffice").from("services")
         .select("id, slug, display_name")
         .eq("id", product.service_id)
         .single();
@@ -106,7 +106,7 @@ export async function resolveProduct(
   // Strategy 4: service_slug + country_code
   if (params.service_slug && params.country_code) {
     const { data: svc, error: svcErr } = await supabase
-      .schema("backoffice").from("bo_services")
+      .schema("backoffice").from("services")
       .select("id, slug, display_name")
       .eq("slug", params.service_slug)
       .eq("status", "active")
@@ -116,7 +116,7 @@ export async function resolveProduct(
     if (!svc) throw new Error(`Service '${params.service_slug}' not found or inactive`);
 
     const { data: product, error } = await supabase
-      .schema("backoffice").from("bo_products")
+      .schema("backoffice").from("products")
       .select("id, slug, display_name, country_code, native_bundle_id, hostname_staging, hostname_production")
       .eq("service_id", svc.id)
       .eq("country_code", params.country_code.toUpperCase())
@@ -136,7 +136,7 @@ export async function resolveProduct(
   // Strategy 5: service_slug only (default product)
   if (params.service_slug) {
     const { data: svc, error: svcErr } = await supabase
-      .schema("backoffice").from("bo_services")
+      .schema("backoffice").from("services")
       .select("id, slug, display_name")
       .eq("slug", params.service_slug)
       .eq("status", "active")
@@ -146,7 +146,7 @@ export async function resolveProduct(
     if (!svc) throw new Error(`Service '${params.service_slug}' not found or inactive`);
 
     const { data: product, error } = await supabase
-      .schema("backoffice").from("bo_products")
+      .schema("backoffice").from("products")
       .select("id, slug, display_name, country_code, native_bundle_id, hostname_staging, hostname_production")
       .eq("service_id", svc.id)
       .eq("is_default", true)

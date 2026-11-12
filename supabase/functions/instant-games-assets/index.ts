@@ -177,7 +177,7 @@ async function resolveProductLocaleId(
   const languageCode = locale.includes("-") ? locale.split("-")[0] : locale;
 
   const { data } = await supabase
-    .schema("backoffice").from("bo_product_locales")
+    .schema("backoffice").from("product_locales")
     .select("id")
     .eq("product_id", productId)
     .eq("language_code", languageCode)
@@ -223,7 +223,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   });
 
   const { data: product, error: productError } = await supabase
-    .schema("backoffice").from("bo_products")
+    .schema("backoffice").from("products")
     .select("id, service_id")
     .eq("id", productId)
     .maybeSingle();
@@ -258,14 +258,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
 
       const { data: serviceRows } = await supabase
-        .schema("backoffice").from("bo_service_instant_games_defaults")
+        .schema("backoffice").from("service_instant_games_defaults")
         .select("id, game_type_id, template_name, is_default, enabled, enabled_from, enabled_to, preview_icon, assets, theme, config")
         .eq("service_id", service_id)
         .eq("environment", dbEnv)
         .in("game_type_id", typeIds);
 
       const { data: productRows } = await supabase
-        .schema("backoffice").from("bo_product_instant_games")
+        .schema("backoffice").from("product_instant_games")
         .select("id, game_type_id, template_name, is_default, enabled, enabled_from, enabled_to, preview_icon, assets, theme, config")
         .eq("product_id", product_id)
         .eq("environment", dbEnv)
@@ -274,7 +274,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       let localeRows: DbTemplate[] = [];
       if (productLocaleId) {
         const { data } = await supabase
-          .schema("backoffice").from("bo_locale_instant_games")
+          .schema("backoffice").from("locale_instant_games")
           .select("id, game_type_id, template_name, is_default, enabled, enabled_from, enabled_to, preview_icon, assets, theme, config")
           .eq("product_locale_id", productLocaleId)
           .eq("environment", dbEnv)
@@ -338,13 +338,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       const [{ data: serviceRows }, { data: productRows }] = await Promise.all([
         supabase
-          .schema("backoffice").from("bo_service_instant_games_defaults")
+          .schema("backoffice").from("service_instant_games_defaults")
           .select("id, game_type_id, template_name, is_default, enabled, enabled_from, enabled_to, preview_icon, assets, theme, config")
           .eq("service_id", service_id)
           .eq("environment", dbEnv)
           .eq("game_type_id", typeId),
         supabase
-          .schema("backoffice").from("bo_product_instant_games")
+          .schema("backoffice").from("product_instant_games")
           .select("id, game_type_id, template_name, is_default, enabled, enabled_from, enabled_to, preview_icon, assets, theme, config")
           .eq("product_id", product_id)
           .eq("environment", dbEnv)
@@ -354,7 +354,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       let localeRows: DbTemplate[] = [];
       if (productLocaleId) {
         const { data } = await supabase
-          .schema("backoffice").from("bo_locale_instant_games")
+          .schema("backoffice").from("locale_instant_games")
           .select("id, game_type_id, template_name, is_default, enabled, enabled_from, enabled_to, preview_icon, assets, theme, config")
           .eq("product_locale_id", productLocaleId)
           .eq("environment", dbEnv)

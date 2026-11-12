@@ -74,7 +74,7 @@ Deno.serve(async (req)=>{
     if (userErr || !userData?.user) return json({
       error: "unauthenticated"
     }, 401);
-    const { data: role } = await admin.schema("backoffice").from("bo_backoffice_users").select("role,is_active,service_scope,product_scope").eq("user_id", userData.user.id).maybeSingle();
+    const { data: role } = await admin.schema("backoffice").from("backoffice_users").select("role,is_active,service_scope,product_scope").eq("user_id", userData.user.id).maybeSingle();
     if (!role || !role.is_active) return json({
       error: "forbidden"
     }, 403);
@@ -92,7 +92,7 @@ Deno.serve(async (req)=>{
       if (!productLocaleId || !environment) return json({
         error: "missing_params"
       }, 400);
-      const { data, error } = await admin.schema("backoffice").from("bo_product_secrets").select("*").eq("product_locale_id", productLocaleId).eq("environment", environment).order("key", {
+      const { data, error } = await admin.schema("backoffice").from("product_secrets").select("*").eq("product_locale_id", productLocaleId).eq("environment", environment).order("key", {
         ascending: true
       });
       if (error) return json({
@@ -117,13 +117,13 @@ Deno.serve(async (req)=>{
         description: body.description ?? "",
         updated_at: new Date().toISOString()
       };
-      const { data, error } = await admin.schema("backoffice").from("bo_product_secrets").upsert(payload, {
+      const { data, error } = await admin.schema("backoffice").from("product_secrets").upsert(payload, {
         onConflict: "product_locale_id,environment,key"
       }).select().maybeSingle();
       if (error) return json({
         error: error.message
       }, 500);
-      await admin.schema("backoffice").from("bo_backoffice_audit_log").insert({
+      await admin.schema("backoffice").from("backoffice_audit_log").insert({
         actor_id: userData.user.id,
         actor_email: userData.user.email ?? "",
         action: "upsert_secret",
@@ -146,12 +146,12 @@ Deno.serve(async (req)=>{
         error: "forbidden"
       }, 403);
       const id = parts[0];
-      const { data: existing } = await admin.schema("backoffice").from("bo_product_secrets").select("product_locale_id,environment,key").eq("id", id).maybeSingle();
-      const { error } = await admin.schema("backoffice").from("bo_product_secrets").delete().eq("id", id);
+      const { data: existing } = await admin.schema("backoffice").from("product_secrets").select("product_locale_id,environment,key").eq("id", id).maybeSingle();
+      const { error } = await admin.schema("backoffice").from("product_secrets").delete().eq("id", id);
       if (error) return json({
         error: error.message
       }, 500);
-      await admin.schema("backoffice").from("bo_backoffice_audit_log").insert({
+      await admin.schema("backoffice").from("backoffice_audit_log").insert({
         actor_id: userData.user.id,
         actor_email: userData.user.email ?? "",
         action: "delete_secret",

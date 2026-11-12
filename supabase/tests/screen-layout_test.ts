@@ -28,8 +28,8 @@ function section(id: string, screenId: string, extra: Row = {}): Row {
 }
 
 function seedBase(fake: FakeSupabase) {
-  fake.seed("backoffice.bo_products", [{ id: PRODUCT, service_id: SERVICE, timezone: null, country_code: "IT" }]);
-  fake.seed("backoffice.bo_product_locales", [
+  fake.seed("backoffice.products", [{ id: PRODUCT, service_id: SERVICE, timezone: null, country_code: "IT" }]);
+  fake.seed("backoffice.product_locales", [
     { id: LOCALE_EN, product_id: PRODUCT, language_code: "en", is_default: true, status: "active", created_at: "2026-01-01" },
     { id: LOCALE_IT, product_id: PRODUCT, language_code: "it", is_default: false, status: "active", created_at: "2026-01-02" },
   ]);
@@ -83,17 +83,17 @@ Deno.test("screen-layout: unknown product returns 404", async () => {
 
 Deno.test("screen-layout: database errors map to the spec 500 messages", async () => {
   await withFake(async (fake) => {
-    fake.fail("backoffice.bo_products");
+    fake.fail("backoffice.products");
     assertEquals((await call({ product_id: PRODUCT })).body, { ok: false, error: "Could not load product" });
   });
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.fail("backoffice.bo_product_locales");
+    fake.fail("backoffice.product_locales");
     assertEquals((await call({ product_id: PRODUCT })).body, { ok: false, error: "Could not load languages" });
   });
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.fail("backoffice.bo_app_screens");
+    fake.fail("backoffice.app_screens");
     const { status, body } = await call({ product_id: PRODUCT });
     assertEquals(status, 500);
     assertEquals(body, { ok: false, error: "Could not load screens" });
@@ -107,7 +107,7 @@ Deno.test("screen-layout: database errors map to the spec 500 messages", async (
 Deno.test("screen-layout: list merges levels, hides disabled screens and sorts by key", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [
+    fake.seed("backoffice.app_screens", [
       screen("s-home", "home", { service_id: SERVICE }),
       screen("s-promo", "promo", { service_id: SERVICE }),
       screen("p-promo", "promo", { product_id: PRODUCT }, { name: "Promo product" }),
@@ -139,12 +139,12 @@ Deno.test("screen-layout: list merges levels, hides disabled screens and sorts b
 Deno.test("screen-layout: list mode returns each screen complete, like the single-screen call", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [
+    fake.seed("backoffice.app_screens", [
       screen("s-home", "home", { service_id: SERVICE }),
       screen("s-promo", "promo", { service_id: SERVICE }),
       screen("s-empty", "empty", { service_id: SERVICE }),
     ]);
-    fake.seed("backoffice.bo_app_screen_sections", [
+    fake.seed("backoffice.app_screen_sections", [
       section("h-desk", "s-home", { platform: "desktop", position: 0, config: { label: "Desk" } }),
       section("h-mob-2", "s-home", { position: 3, widget_type: "banner", config: { image_url: `${STORAGE}/b.png` } }),
       section("h-mob-1", "s-home", { position: 1, visible_to: ["free"] }),
@@ -167,7 +167,7 @@ Deno.test("screen-layout: list mode returns each screen complete, like the singl
     }
     assertEquals((screens[1].sections as Row[]).map((s) => [s.id, s.position]), [["h-mob-1", 0], ["h-mob-2", 1]]);
 
-    const widgetQueries = fake.requests.filter((r) => r.path.endsWith("/bo_app_screen_sections"));
+    const widgetQueries = fake.requests.filter((r) => r.path.endsWith("/app_screen_sections"));
     assertEquals(widgetQueries.length, 1 + screens.length);
   });
 });
@@ -175,7 +175,7 @@ Deno.test("screen-layout: list mode returns each screen complete, like the singl
 Deno.test("screen-layout: list mode hides slugs whose winning level is disabled", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [
+    fake.seed("backoffice.app_screens", [
       screen("s-home", "home", { service_id: SERVICE }),
       screen("s-promo", "promo", { service_id: SERVICE }),
       screen("p-promo", "promo", { product_id: PRODUCT }, { enabled: false }),
@@ -193,22 +193,22 @@ Deno.test("screen-layout: list mode with no active screen returns 200 and an emp
     const { status, body } = await call({ product_id: PRODUCT, environment: "staging", platform: "desktop" });
     assertEquals(status, 200);
     assertEquals(body, { ok: true, data: { environment: "staging", locale: "en", platform: "desktop", timezone: "Europe/Rome", screens: [] } });
-    assertEquals(fake.requests.filter((r) => r.path.endsWith("/bo_app_screen_sections")).length, 0);
+    assertEquals(fake.requests.filter((r) => r.path.endsWith("/app_screen_sections")).length, 0);
   });
 });
 
 Deno.test("screen-layout: list mode translates the texts of every screen", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [
+    fake.seed("backoffice.app_screens", [
       screen("s-a", "a", { service_id: SERVICE }),
       screen("s-b", "b", { service_id: SERVICE }),
     ]);
-    fake.seed("backoffice.bo_app_screen_sections", [
+    fake.seed("backoffice.app_screen_sections", [
       section("wa", "s-a", { config: { i18n: { title: { namespace: "aScreen", key: "t" } } } }),
       section("wb", "s-b", { config: { i18n: { title: { namespace: "bScreen", key: "t" } } } }),
     ]);
-    fake.seed("backoffice.bo_service_translations_defaults", [
+    fake.seed("backoffice.service_translations_defaults", [
       { service_id: SERVICE, environment: "staging", language_code: "en", namespace: "aScreen", key: "t", value: "Title A" },
       { service_id: SERVICE, environment: "staging", language_code: "en", namespace: "bScreen", key: "t", value: "Title B" },
     ]);
@@ -220,15 +220,15 @@ Deno.test("screen-layout: list mode translates the texts of every screen", async
 Deno.test("screen-layout: list mode errors on widgets and texts return 500", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
-    fake.fail("backoffice.bo_app_screen_sections");
+    fake.seed("backoffice.app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
+    fake.fail("backoffice.app_screen_sections");
     assertEquals((await call({ product_id: PRODUCT, environment: "staging" })).body, { ok: false, error: "Could not load screens" });
   });
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
-    fake.seed("backoffice.bo_app_screen_sections", [section("w", "s-home", { config: { i18n: { title: { namespace: "n", key: "k" } } } })]);
-    fake.fail("backoffice.bo_product_translations");
+    fake.seed("backoffice.app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
+    fake.seed("backoffice.app_screen_sections", [section("w", "s-home", { config: { i18n: { title: { namespace: "n", key: "k" } } } })]);
+    fake.fail("backoffice.product_translations");
     assertEquals((await call({ product_id: PRODUCT, environment: "staging" })).body, { ok: false, error: "Could not load texts" });
   });
 });
@@ -236,7 +236,7 @@ Deno.test("screen-layout: list mode errors on widgets and texts return 500", asy
 Deno.test("screen-layout: an empty screen returns the screen list", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [
+    fake.seed("backoffice.app_screens", [
       screen("s-home", "home", { service_id: SERVICE }),
       screen("p-promo", "promo", { product_id: PRODUCT }),
     ]);
@@ -251,7 +251,7 @@ Deno.test("screen-layout: an empty screen returns the screen list", async () => 
 Deno.test("screen-layout: environment defaults to production", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
+    fake.seed("backoffice.app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
     const { status, body } = await call({ product_id: PRODUCT, screen: "home" });
     assertEquals(status, 404);
     assertEquals(body, { ok: false, error: "Screen 'home' not found" });
@@ -271,15 +271,15 @@ Deno.test("screen-layout: locale resolution (requested, alias, default, first, n
     assertEquals(((await call({ product_id: PRODUCT, locale: "en", language_code: "it" })).body.data as Row).locale, "en");
   });
   await withFake(async (fake) => {
-    fake.seed("backoffice.bo_products", [{ id: PRODUCT, service_id: SERVICE, timezone: null, country_code: "IT" }]);
-    fake.seed("backoffice.bo_product_locales", [
+    fake.seed("backoffice.products", [{ id: PRODUCT, service_id: SERVICE, timezone: null, country_code: "IT" }]);
+    fake.seed("backoffice.product_locales", [
       { id: LOCALE_IT, product_id: PRODUCT, language_code: "it", is_default: false, status: "active", created_at: "2026-01-02" },
       { id: LOCALE_EN, product_id: PRODUCT, language_code: "en", is_default: true, status: "archived", created_at: "2026-01-01" },
     ]);
     assertEquals(((await call({ product_id: PRODUCT, locale: "en" })).body.data as Row).locale, "it");
   });
   await withFake(async (fake) => {
-    fake.seed("backoffice.bo_products", [{ id: PRODUCT, service_id: SERVICE, timezone: null, country_code: "IT" }]);
+    fake.seed("backoffice.products", [{ id: PRODUCT, service_id: SERVICE, timezone: null, country_code: "IT" }]);
     assertEquals(((await call({ product_id: PRODUCT })).body.data as Row).locale, null);
   });
 });
@@ -287,7 +287,7 @@ Deno.test("screen-layout: locale resolution (requested, alias, default, first, n
 Deno.test("screen-layout: time zone from product, then country, then UTC", async () => {
   const tz = async (timezone: string | null, country: string | null) =>
     await withFake(async (fake) => {
-      fake.seed("backoffice.bo_products", [{ id: PRODUCT, service_id: SERVICE, timezone, country_code: country }]);
+      fake.seed("backoffice.products", [{ id: PRODUCT, service_id: SERVICE, timezone, country_code: country }]);
       return ((await call({ product_id: PRODUCT })).body.data as Row).timezone;
     });
   assertEquals(await tz("Asia/Tokyo", "IT"), "Asia/Tokyo");
@@ -304,7 +304,7 @@ Deno.test("screen-layout: time zone from product, then country, then UTC", async
 Deno.test("screen-layout: the most specific level wins and disabled winners return 404", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [
+    fake.seed("backoffice.app_screens", [
       screen("s-home", "home", { service_id: SERVICE }),
       screen("p-home", "home", { product_id: PRODUCT }),
       screen("l-home", "home", { product_locale_id: LOCALE_IT }),
@@ -324,7 +324,7 @@ Deno.test("screen-layout: the most specific level wins and disabled winners retu
 Deno.test("screen-layout: screen key is matched case-insensitively", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
+    fake.seed("backoffice.app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
     const { status, body } = await call({ product_id: PRODUCT, screen: "Home", environment: "staging" });
     assertEquals(status, 200);
     assertEquals((body.data as Row).screen, "home");
@@ -334,8 +334,8 @@ Deno.test("screen-layout: screen key is matched case-insensitively", async () =>
 Deno.test("screen-layout: full section output per widget type", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
-    fake.seed("backoffice.bo_app_screen_sections", [
+    fake.seed("backoffice.app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
+    fake.seed("backoffice.app_screen_sections", [
       section("w-text", "s-home", {
         position: 0,
         config: { label: "Info", description: "Watch and earn", link: { type: "internal", url: "rewards/list" }, challenge_id: 42 },
@@ -401,8 +401,8 @@ Deno.test("screen-layout: full section output per widget type", async () => {
 Deno.test("screen-layout: invalid links and media are nulled", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
-    fake.seed("backoffice.bo_app_screen_sections", [
+    fake.seed("backoffice.app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
+    fake.seed("backoffice.app_screen_sections", [
       section("a", "s-home", { position: 0, config: { link: { type: "external", url: "http://insecure.example.com" } } }),
       section("b", "s-home", { position: 1, config: { link: { type: "internal", url: "/absolute" } } }),
       section("c", "s-home", { position: 2, config: { link: { type: "internal", url: "../escape" } } }),
@@ -424,8 +424,8 @@ Deno.test("screen-layout: invalid links and media are nulled", async () => {
 Deno.test("screen-layout: carousel off keeps only the first item", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
-    fake.seed("backoffice.bo_app_screen_sections", [
+    fake.seed("backoffice.app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
+    fake.seed("backoffice.app_screen_sections", [
       section("w", "s-home", {
         widget_type: "custom_widget",
         config: { carousel_enabled: false, slides: [{ id: "1", title: "One" }, { id: "2", title: "Two" }] },
@@ -439,8 +439,8 @@ Deno.test("screen-layout: carousel off keeps only the first item", async () => {
 Deno.test("screen-layout: platform fallback, hidden widgets and positions restart from 0", async () => {
   await withFake(async (fake) => {
     seedBase(fake);
-    fake.seed("backoffice.bo_app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
-    fake.seed("backoffice.bo_app_screen_sections", [
+    fake.seed("backoffice.app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
+    fake.seed("backoffice.app_screen_sections", [
       section("m-hidden", "s-home", { position: 0, enabled: false }),
       section("m-2", "s-home", { position: 5 }),
       section("m-1", "s-home", { position: 2 }),
@@ -455,10 +455,10 @@ Deno.test("screen-layout: platform fallback, hidden widgets and positions restar
 
 Deno.test("screen-layout: schedule uses product-local minutes with an inclusive end", async () => {
   await withFake(async (fake) => {
-    fake.seed("backoffice.bo_products", [{ id: PRODUCT, service_id: SERVICE, timezone: "UTC", country_code: null }]);
-    fake.seed("backoffice.bo_app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
+    fake.seed("backoffice.products", [{ id: PRODUCT, service_id: SERVICE, timezone: "UTC", country_code: null }]);
+    fake.seed("backoffice.app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
     const now = new Date().toISOString().slice(0, 16);
-    fake.seed("backoffice.bo_app_screen_sections", [
+    fake.seed("backoffice.app_screen_sections", [
       section("future", "s-home", { position: 0, start_at_local: "2999-01-01T00:00:00" }),
       section("past", "s-home", { position: 1, end_at_local: "2000-01-01 00:00:00" }),
       section("ends-now", "s-home", { position: 2, end_at_local: `${now}:00` }),
@@ -479,8 +479,8 @@ const ref = (namespace: string, key: string) => ({ namespace, key });
 
 function seedTexts(fake: FakeSupabase) {
   seedBase(fake);
-  fake.seed("backoffice.bo_app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
-  fake.seed("backoffice.bo_app_screen_sections", [
+  fake.seed("backoffice.app_screens", [screen("s-home", "home", { service_id: SERVICE })]);
+  fake.seed("backoffice.app_screen_sections", [
     section("w", "s-home", {
       platform: "desktop", widget_type: "custom_widget", title: "raw",
       config: {
@@ -490,13 +490,13 @@ function seedTexts(fake: FakeSupabase) {
       },
     }),
   ]);
-  fake.seed("backoffice.bo_service_translations_defaults", [
+  fake.seed("backoffice.service_translations_defaults", [
     { service_id: SERVICE, environment: "staging", language_code: "en", namespace: "homeScreen", key: "title", value: "Service title" },
     { service_id: SERVICE, environment: "staging", language_code: "en", namespace: "homeScreen", key: "desc", value: "Service desc" },
     { service_id: SERVICE, environment: "staging", language_code: "en", namespace: "homeScreen", key: "slide", value: "Service slide" },
     { service_id: SERVICE, environment: "staging", language_code: "it", namespace: "homeScreen", key: "desc", value: "Descrizione" },
   ]);
-  fake.seed("backoffice.bo_product_translations", [
+  fake.seed("backoffice.product_translations", [
     { product_locale_id: LOCALE_EN, environment: "staging", namespace: "homeScreen", key: "slide", value: "Locale slide" },
     { product_locale_id: LOCALE_EN, environment: "production", namespace: "homeScreen", key: "desc", value: "Prod desc" },
   ]);
@@ -521,7 +521,7 @@ Deno.test("screen-layout: texts come from locale overrides, then service default
 Deno.test("screen-layout: text loading errors return 500", async () => {
   await withFake(async (fake) => {
     seedTexts(fake);
-    fake.fail("backoffice.bo_product_translations");
+    fake.fail("backoffice.product_translations");
     const { status, body } = await call({ product_id: PRODUCT, screen: "home", environment: "staging" });
     assertEquals(status, 500);
     assertEquals(body, { ok: false, error: "Could not load texts" });

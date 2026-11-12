@@ -87,32 +87,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
       await supabase.storage.from("avatars").remove(list.map((f) => prefix + f.name));
     }
 
-    // Delete from secondary tables (scoped to product)
-    const tables = [
-      "user_activities",
-      "user_badges",
-      "user_rewards",
-      "user_cards",
-      "user_wishlist",
-      "quiz_attempts",
-      "avatar_generations",
-    ];
-    for (const t of tables) {
-      await supabase.from(t).delete().eq("user_id", userId).eq("service_id", serviceId).eq("product_id", productId);
+    // Delete from KEEP secondary tables (scoped to product)
+    for (const t of ["user_badges", "quiz_attempts", "avatar_generations"] as const) {
+      await supabase.schema("application").from(t)
+        .delete().eq("user_id", userId).eq("service_id", serviceId).eq("product_id", productId);
     }
 
     // Anonymize profile
     const { error } = await supabase
-      .from("profiles")
+      .schema("application").from("profiles")
       .update({
         nickname: `deleted_${userId.substring(0, 8)}`,
         avatar_url: null,
-        avatar_traits: {},
         preferences: {},
         onboarding_completed: false,
         total_points: 0,
         points_this_week: 0,
-        badge_name: null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", userId)

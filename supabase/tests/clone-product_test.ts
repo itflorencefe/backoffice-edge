@@ -9,7 +9,7 @@ const body = { source_product_id: "src", new_slug: "fr-test", new_display_name: 
 
 function seedEditor(fake: FakeSupabase, role = "editor") {
   fake.addAuthUser({ id: "user-1", email: "editor@example.com", token: TOKEN });
-  fake.seed("backoffice.bo_backoffice_users", [{ id: "bo-1", user_id: "user-1", role, is_active: true }]);
+  fake.seed("backoffice.backoffice_users", [{ id: "bo-1", user_id: "user-1", role, is_active: true }]);
 }
 
 /** A JWT-shaped token whose payload carries app_role (the signature is not checked by the function). */
@@ -53,27 +53,27 @@ Deno.test("clone-product: required fields and unknown source", async () => {
 Deno.test("clone-product: copies product data, locales, login methods, rules and app screens", async () => {
   await withFake(async (fake) => {
     seedEditor(fake, "admin");
-    fake.seed("backoffice.bo_products", [
+    fake.seed("backoffice.products", [
       { id: "src", service_id: "svc", slug: "it-test", display_name: "Test IT", country_code: "IT", native_bundle_id: null, timezone: "Europe/Rome" },
     ]);
-    fake.seed("backoffice.bo_product_locales", [
+    fake.seed("backoffice.product_locales", [
       { id: "loc-src", product_id: "src", language_code: "it", display_name: "Italiano", is_default: true, status: "active" },
     ]);
-    fake.seed("backoffice.bo_product_login_methods", [
+    fake.seed("backoffice.product_login_methods", [
       { id: "lm1", product_id: "src", environment: "staging", type: "google", enabled: true, is_default: false, display_order: 10, config: { app_id: "g-1" } },
       { id: "lm2", product_id: "src", environment: "production", type: "msisdn_pin", enabled: true, is_default: true, display_order: 0, config: {} },
     ]);
-    fake.seed("backoffice.bo_product_translations", [
+    fake.seed("backoffice.product_translations", [
       { product_locale_id: "loc-src", environment: "staging", namespace: "itTestHomeScreen", key: "title", value: "Ciao" },
     ]);
-    fake.seed("backoffice.bo_page_behaviour_rules", [
+    fake.seed("backoffice.page_behaviour_rules", [
       { id: "pr", product_id: "src", environment: "staging", path: "/p", label: null, position: 0, enabled: true, screen_slug: null },
       { id: "lr", product_locale_id: "loc-src", environment: "staging", path: "/l", label: null, position: 0, enabled: true, screen_slug: null },
     ]);
-    fake.seed("backoffice.bo_app_screens", [
+    fake.seed("backoffice.app_screens", [
       { id: "scr", product_id: "src", environment: "staging", slug: "home", name: "Home", enabled: true },
     ]);
-    fake.seed("backoffice.bo_app_screen_sections", [{
+    fake.seed("backoffice.app_screen_sections", [{
       id: "sec", screen_id: "scr", platform: "mobile", widget_type: "placeholder_text", title: "t", show_title: true, enabled: true,
       position: 0, col_span: 12, start_at_local: null, end_at_local: null, visible_to: ["premium"],
       config: { i18n: { title: { namespace: "itTestHomeScreen", key: "title", owned: true } } },
@@ -86,38 +86,38 @@ Deno.test("clone-product: copies product data, locales, login methods, rules and
     assertEquals(out.locales_cloned, 1);
     assertEquals(out.app_screens_cloned, 1);
 
-    const product = fake.rows("backoffice.bo_products").find((p) => p.slug === "fr-test")!;
+    const product = fake.rows("backoffice.products").find((p) => p.slug === "fr-test")!;
     assertEquals([product.country_code, product.service_id, product.timezone], ["FR", "svc", "Europe/Rome"]);
 
-    const methods = fake.rows("backoffice.bo_product_login_methods").filter((m) => m.product_id === product.id);
+    const methods = fake.rows("backoffice.product_login_methods").filter((m) => m.product_id === product.id);
     assertEquals(methods.map((m) => [m.environment, m.type, (m.config as Record<string, unknown>).app_id]), [
       ["staging", "google", "g-1"],
       ["production", "msisdn_pin", undefined],
     ]);
 
-    const locale = fake.rows("backoffice.bo_product_locales").find((l) => l.product_id === product.id)!;
-    const rules = fake.rows("backoffice.bo_page_behaviour_rules");
+    const locale = fake.rows("backoffice.product_locales").find((l) => l.product_id === product.id)!;
+    const rules = fake.rows("backoffice.page_behaviour_rules");
     assertEquals(rules.filter((r) => r.product_id === product.id).map((r) => r.path), ["/p"]);
     assertEquals(rules.filter((r) => r.product_locale_id === locale.id).map((r) => r.path), ["/l"]);
 
-    const screen = fake.rows("backoffice.bo_app_screens").find((s) => s.product_id === product.id)!;
-    const [section] = fake.rows("backoffice.bo_app_screen_sections").filter((s) => s.screen_id === screen.id);
+    const screen = fake.rows("backoffice.app_screens").find((s) => s.product_id === product.id)!;
+    const [section] = fake.rows("backoffice.app_screen_sections").filter((s) => s.screen_id === screen.id);
     assertEquals(section.visible_to, ["premium"]);
     const i18n = (section.config as { i18n: { title: { namespace: string } } }).i18n;
     assertEquals(i18n.title.namespace, "frTestHomeScreen");
-    const texts = fake.rows("backoffice.bo_product_translations").filter((t) => t.product_locale_id === locale.id);
+    const texts = fake.rows("backoffice.product_translations").filter((t) => t.product_locale_id === locale.id);
     assertEquals(texts.map((t) => [t.namespace, t.key, t.value]), [["frTestHomeScreen", "title", "Ciao"]]);
   });
 });
 
 Deno.test("clone-product: login method failures never drop the seeded defaults blindly and do not fail the clone", async () => {
-  const LM = "/rest/v1/bo_product_login_methods";
+  const LM = "/rest/v1/product_login_methods";
   const seedSource = (fake: FakeSupabase) => {
     seedEditor(fake, "admin");
-    fake.seed("backoffice.bo_products", [
+    fake.seed("backoffice.products", [
       { id: "src", service_id: "svc", slug: "it-test", display_name: "Test IT", country_code: "IT", native_bundle_id: null, timezone: null },
     ]);
-    fake.seed("backoffice.bo_product_login_methods", [
+    fake.seed("backoffice.product_login_methods", [
       { id: "lm1", product_id: "src", environment: "staging", type: "google", enabled: true, is_default: false, display_order: 10, config: {} },
     ]);
   };
@@ -129,7 +129,7 @@ Deno.test("clone-product: login method failures never drop the seeded defaults b
     // Source rows cannot be read: nothing is deleted or written.
     await withFake(async (fake) => {
       seedSource(fake);
-      fake.fail("backoffice.bo_product_login_methods", "GET");
+      fake.fail("backoffice.product_login_methods", "GET");
       const res = await handler(post("clone-product", body, auth));
       assertEquals(res.status, 200);
       await res.body?.cancel();
@@ -138,7 +138,7 @@ Deno.test("clone-product: login method failures never drop the seeded defaults b
     // The seeded defaults cannot be removed: the copy is skipped instead of duplicating rows.
     await withFake(async (fake) => {
       seedSource(fake);
-      fake.fail("backoffice.bo_product_login_methods", "DELETE");
+      fake.fail("backoffice.product_login_methods", "DELETE");
       const res = await handler(post("clone-product", body, auth));
       assertEquals(res.status, 200);
       await res.body?.cancel();
@@ -147,7 +147,7 @@ Deno.test("clone-product: login method failures never drop the seeded defaults b
     // The copy itself fails: the clone still completes.
     await withFake(async (fake) => {
       seedSource(fake);
-      fake.fail("backoffice.bo_product_login_methods", "POST");
+      fake.fail("backoffice.product_login_methods", "POST");
       const res = await handler(post("clone-product", body, auth));
       assertEquals(res.status, 200);
       assertEquals((await readJson(res)).ok, true);
@@ -167,13 +167,13 @@ Deno.test("clone-product: login method failures never drop the seeded defaults b
 Deno.test("clone-product: copies menu items (own rows only, refs renamed), signup settings and product assets", async () => {
   await withFake(async (fake) => {
     seedEditor(fake, "admin");
-    fake.seed("backoffice.bo_products", [
+    fake.seed("backoffice.products", [
       { id: "src", service_id: "svc", slug: "it-test", display_name: "Test IT", country_code: "IT", native_bundle_id: null, timezone: null },
     ]);
-    fake.seed("backoffice.bo_product_locales", [
+    fake.seed("backoffice.product_locales", [
       { id: "loc-src", product_id: "src", language_code: "it", display_name: "Italiano", is_default: true, status: "active" },
     ]);
-    fake.seed("backoffice.bo_product_menu_items", [
+    fake.seed("backoffice.product_menu_items", [
       { id: "m-prod", product_id: "src", product_locale_id: null, environment: "staging", item_key: "vip", label: "VIP", enabled: true,
         label_i18n_key: "itTestMenuItems.vipText", badge_i18n_key: "menuItems.sharedBadge", screen_slug: "vip", source_item_id: null },
       { id: "m-loc", product_id: null, product_locale_id: "loc-src", environment: "staging", item_key: "help", label: "Help", enabled: false,
@@ -181,16 +181,16 @@ Deno.test("clone-product: copies menu items (own rows only, refs renamed), signu
       // Materialised from a starter menu level: recreated by the seed triggers, never copied.
       { id: "m-seeded", product_id: null, product_locale_id: "loc-src", environment: "staging", item_key: "home", label: "Home", enabled: true, source_item_id: "lvl-1" },
     ]);
-    fake.seed("backoffice.bo_product_menu_item_tiers", [
+    fake.seed("backoffice.product_menu_item_tiers", [
       { menu_item_id: "m-prod", tier: "guest", visible: true, enabled: false, locked_action: "login", label_i18n_key: "itTestMenuItems.vipGuest", screen_slug: "login" },
     ]);
-    fake.seed("backoffice.bo_product_translations", [
+    fake.seed("backoffice.product_translations", [
       { product_locale_id: "loc-src", environment: "staging", namespace: "itTestMenuItems", key: "helpText", value: "Aiuto" },
     ]);
-    fake.seed("backoffice.bo_product_signup_settings", [
+    fake.seed("backoffice.product_signup_settings", [
       { product_id: "src", environment: "staging", enabled: true, signup_url: "/register" },
     ]);
-    fake.seed("backoffice.bo_product_level_assets", [
+    fake.seed("backoffice.product_level_assets", [
       { product_id: "src", environment: "production", asset_key: "logo", url: "https://cdn.test/logo.png", mime_type: "image/png", metadata: {} },
     ]);
 
@@ -198,22 +198,46 @@ Deno.test("clone-product: copies menu items (own rows only, refs renamed), signu
     assertEquals(res.status, 200);
     assertEquals((await readJson(res)).menu_items_cloned, 2);
 
-    const product = fake.rows("backoffice.bo_products").find((p) => p.slug === "fr-test")!;
-    const locale = fake.rows("backoffice.bo_product_locales").find((l) => l.product_id === product.id)!;
-    const items = fake.rows("backoffice.bo_product_menu_items");
+    const product = fake.rows("backoffice.products").find((p) => p.slug === "fr-test")!;
+    const locale = fake.rows("backoffice.product_locales").find((l) => l.product_id === product.id)!;
+    const items = fake.rows("backoffice.product_menu_items");
     const prodItem = items.find((m) => m.product_id === product.id)!;
     assertEquals([prodItem.item_key, prodItem.label_i18n_key, prodItem.badge_i18n_key, prodItem.screen_slug],
       ["vip", "frTestMenuItems.vipText", "menuItems.sharedBadge", "vip"]);
     assertEquals(items.filter((m) => m.product_locale_id === locale.id).map((m) => [m.item_key, m.enabled, m.label_i18n_key]),
       [["help", false, "frTestMenuItems.helpText"]]);
-    const tiers = fake.rows("backoffice.bo_product_menu_item_tiers").filter((t) => t.menu_item_id === prodItem.id);
+    const tiers = fake.rows("backoffice.product_menu_item_tiers").filter((t) => t.menu_item_id === prodItem.id);
     assertEquals(tiers.map((t) => [t.tier, t.label_i18n_key, t.screen_slug]), [["guest", "frTestMenuItems.vipGuest", "login"]]);
-    const texts = fake.rows("backoffice.bo_product_translations").filter((t) => t.product_locale_id === locale.id);
+    const texts = fake.rows("backoffice.product_translations").filter((t) => t.product_locale_id === locale.id);
     assertEquals(texts.map((t) => [t.namespace, t.key]), [["frTestMenuItems", "helpText"]]);
 
-    const signup = fake.rows("backoffice.bo_product_signup_settings").filter((s) => s.product_id === product.id);
+    const signup = fake.rows("backoffice.product_signup_settings").filter((s) => s.product_id === product.id);
     assertEquals(signup.map((s) => [s.environment, s.enabled, s.signup_url, s.updated_by]), [["staging", true, "/register", "user-1"]]);
-    const assets = fake.rows("backoffice.bo_product_level_assets").filter((a) => a.product_id === product.id);
+    const assets = fake.rows("backoffice.product_level_assets").filter((a) => a.product_id === product.id);
     assertEquals(assets.map((a) => [a.environment, a.asset_key, a.url]), [["production", "logo", "https://cdn.test/logo.png"]]);
+  });
+});
+
+Deno.test("clone-product: copies menu items on a BBM-schema database (no starter menu levels)", async () => {
+  await withFake(async (fake) => {
+    seedEditor(fake, "admin");
+    fake.dropColumns("backoffice.product_menu_items", ["source_item_id", "menu_id", "item_type", "document_slug", "nested_menu_key"]);
+    fake.seed("backoffice.products", [
+      { id: "src", service_id: "svc", slug: "it-test", display_name: "Test IT", country_code: "IT", native_bundle_id: null, timezone: null },
+    ]);
+    fake.seed("backoffice.product_locales", [
+      { id: "loc-src", product_id: "src", language_code: "it", display_name: "Italiano", is_default: true, status: "active" },
+    ]);
+    fake.seed("backoffice.product_menu_items", [
+      { id: "m-prod", product_id: "src", environment: "staging", item_key: "vip", label: "VIP", enabled: true, label_i18n_key: "itTestMenuItems.vipText" },
+      { id: "m-loc", product_locale_id: "loc-src", environment: "staging", item_key: "help", label: "Help", enabled: true },
+    ]);
+
+    const res = await handler(post("clone-product", body, auth));
+    assertEquals(res.status, 200);
+    assertEquals((await readJson(res)).menu_items_cloned, 2);
+    const product = fake.rows("backoffice.products").find((p) => p.slug === "fr-test")!;
+    const prodItem = fake.rows("backoffice.product_menu_items").find((m) => m.product_id === product.id)!;
+    assertEquals([prodItem.item_key, prodItem.label_i18n_key], ["vip", "frTestMenuItems.vipText"]);
   });
 });

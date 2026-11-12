@@ -45,11 +45,11 @@ test('a second sync without changes touches nothing', () => {
 test('local edits are replaced and reported as drift', () => {
   const dir = consumer();
   sync({ target: dir, exclude: [] });
-  fs.writeFileSync(path.join(dir, 'supabase/functions/whoami/index.ts'), '// edited here');
+  fs.writeFileSync(path.join(dir, 'supabase/functions/static-env-proxy/index.ts'), '// edited here');
   const s = sync({ target: dir, exclude: [] });
-  assert.deepEqual(s.drifted, ['supabase/functions/whoami/index.ts']);
-  assert.deepEqual(s.updated, ['supabase/functions/whoami/index.ts']);
-  assert.equal(read(dir, 'supabase/functions/whoami/index.ts'), read('.', 'supabase/functions/whoami/index.ts'));
+  assert.deepEqual(s.drifted, ['supabase/functions/static-env-proxy/index.ts']);
+  assert.deepEqual(s.updated, ['supabase/functions/static-env-proxy/index.ts']);
+  assert.equal(read(dir, 'supabase/functions/static-env-proxy/index.ts'), read('.', 'supabase/functions/static-env-proxy/index.ts'));
 });
 
 test('excluded paths, secrets, CLI state and local tests are never touched', () => {

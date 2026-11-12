@@ -52,7 +52,7 @@ Access control: **every mode** (`discover`, `documents`, `product`, `packs`, `ch
 |---|---|---|
 | No `Authorization: Bearer <jwt>` / token not valid for Supabase Auth | `401` | `Unauthorized` |
 | App user token (`app_role = app_user`) | `403` | `App users are not authorized for this endpoint` |
-| Signed in, no active `backoffice.bo_backoffice_users` row with viewer / editor / admin | `403` | `Insufficient permissions` |
+| Signed in, no active `backoffice.backoffice_users` row with viewer / editor / admin | `403` | `Insufficient permissions` |
 
 Apps do not call `atom`: they read packs through `get-product-packs` and published documents (Atom ones included) through `get-product-document`.
 
@@ -303,7 +303,7 @@ const record = {
 };
 
 const { data, error } = await supabase
-  .from('bo_product_packs')
+  .from('product_packs')
   .upsert(record, { onConflict: 'productId,packId' })
   .select('*')
   .single();
@@ -315,7 +315,7 @@ Validate the display name, a positive integer value, a selected offer, a nonnega
 
 Persist the original Atom end dates and timezones. Do not persist computed `live` values, expired booleans, `providerId`, or an additional offer-title field. `packName` is the existing editable title.
 
-`bo_product_packs` and `reorder_product_packs` live in the `backoffice` schema, the default schema of the backoffice Supabase client, so the calls below need no `.schema()`.
+`product_packs` and `reorder_product_packs` live in the `backoffice` schema, the default schema of the backoffice Supabase client, so the calls below need no `.schema()`.
 
 The primary key is `(productId, packId)`. A product may have several packs; multiple saved configurations for the same product/pack with different offers are not currently supported.
 
@@ -329,7 +329,7 @@ Ask the operator to confirm the deletion, then scope the operation by both keys:
 
 ```ts
 const { error } = await supabase
-  .from('bo_product_packs')
+  .from('product_packs')
   .delete()
   .eq('productId', atomProductId)
   .eq('packId', selectedPackId)
