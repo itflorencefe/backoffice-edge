@@ -53,7 +53,7 @@ async function verifyAdmin(supabaseAdmin, authHeader) {
   const token = authHeader.replace("Bearer ", "");
   const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
   if (authErr || !user) return null;
-  const { data: caller } = await supabaseAdmin.schema("backoffice").from("bo_backoffice_users").select("role").eq("user_id", user.id).eq("is_active", true).maybeSingle();
+  const { data: caller } = await supabaseAdmin.schema("backoffice").from("backoffice_users").select("role").eq("user_id", user.id).eq("is_active", true).maybeSingle();
   if (!caller || caller.role !== "admin") return null;
   return user;
 }
@@ -104,7 +104,7 @@ Deno.serve(async (req)=>{
         }, 400);
       }
       const newPassword = generatePassword();
-      const { data: userCheck, error: userCheckErr } = await supabaseAdmin.schema("backoffice").from("bo_backoffice_users").select("id").eq("user_id", user_id).maybeSingle();
+      const { data: userCheck, error: userCheckErr } = await supabaseAdmin.schema("backoffice").from("backoffice_users").select("id").eq("user_id", user_id).maybeSingle();
       if (userCheckErr || !userCheck) {
         return jsonResponse({
           ok: false,
@@ -135,7 +135,7 @@ Deno.serve(async (req)=>{
           error: "user_id is required"
         }, 400);
       }
-      const { data: userCheck, error: userCheckErr } = await supabaseAdmin.schema("backoffice").from("bo_backoffice_users").select("id, user_id").eq("user_id", user_id).maybeSingle();
+      const { data: userCheck, error: userCheckErr } = await supabaseAdmin.schema("backoffice").from("backoffice_users").select("id, user_id").eq("user_id", user_id).maybeSingle();
       if (userCheckErr || !userCheck) {
         return jsonResponse({
           ok: false,
@@ -149,7 +149,7 @@ Deno.serve(async (req)=>{
           error: "Cannot delete your own account"
         }, 400);
       }
-      const { error: deleteBoErr } = await supabaseAdmin.schema("backoffice").from("bo_backoffice_users").delete().eq("user_id", user_id);
+      const { error: deleteBoErr } = await supabaseAdmin.schema("backoffice").from("backoffice_users").delete().eq("user_id", user_id);
       if (deleteBoErr) {
         return jsonResponse({
           ok: false,
@@ -186,7 +186,7 @@ Deno.serve(async (req)=>{
     // Validate service slugs exist
     const resolvedServiceScope = service_scope || [];
     if (resolvedServiceScope.length > 0) {
-      const { data: services, error: svcErr } = await supabaseAdmin.schema("backoffice").from("bo_services").select("slug").in("slug", resolvedServiceScope);
+      const { data: services, error: svcErr } = await supabaseAdmin.schema("backoffice").from("services").select("slug").in("slug", resolvedServiceScope);
       if (svcErr) {
         return jsonResponse({
           ok: false,
@@ -205,7 +205,7 @@ Deno.serve(async (req)=>{
     // Validate product slugs exist
     const resolvedProductScope = product_scope || [];
     if (resolvedProductScope.length > 0) {
-      const { data: products, error: prodErr } = await supabaseAdmin.schema("backoffice").from("bo_products").select("slug").in("slug", resolvedProductScope);
+      const { data: products, error: prodErr } = await supabaseAdmin.schema("backoffice").from("products").select("slug").in("slug", resolvedProductScope);
       if (prodErr) {
         return jsonResponse({
           ok: false,
@@ -241,7 +241,7 @@ Deno.serve(async (req)=>{
         error: "Failed to create auth user"
       }, 500);
     }
-    const { data: boUser, error: boErr } = await supabaseAdmin.schema("backoffice").from("bo_backoffice_users").insert({
+    const { data: boUser, error: boErr } = await supabaseAdmin.schema("backoffice").from("backoffice_users").insert({
       user_id: newAuthUser.user.id,
       email,
       display_name: display_name || email.split("@")[0],

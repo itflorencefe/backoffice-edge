@@ -144,7 +144,7 @@ async function handleSyncUserLocal(
 
   if (resolved.service) {
     const { data: svcCheck } = await admin
-      .schema("backoffice").from("bo_services")
+      .schema("backoffice").from("services")
       .select("status")
       .eq("id", resolved.service.id)
       .maybeSingle();
@@ -157,7 +157,7 @@ async function handleSyncUserLocal(
 
   // Upsert profile with product_id
   const { error: profileError } = await admin
-    .from("profiles")
+    .schema("application").from("profiles")
     .upsert(
       {
         id: userId,
@@ -290,7 +290,7 @@ async function handleSyncUserProduction(
 
   if (resolved.service) {
     const { data: svcCheck } = await admin
-      .schema("backoffice").from("bo_services")
+      .schema("backoffice").from("services")
       .select("status")
       .eq("id", resolved.service.id)
       .maybeSingle();
@@ -303,7 +303,7 @@ async function handleSyncUserProduction(
 
   // Upsert profile with product_id
   const { error: profileError } = await admin
-    .from("profiles")
+    .schema("application").from("profiles")
     .upsert(
       {
         id: userId,

@@ -20,7 +20,7 @@ atomStub.products.set(String(PRODUCT), {
   legaldocuments: [{ id: 5, name: "Terms", documentType: "terms" }],
 });
 
-/** Atom login, plus the operator session (Auth user + active bo_backoffice_users row with `role`). */
+/** Atom login, plus the operator session (Auth user + active backoffice_users row with `role`). */
 function routes(fake: FakeSupabase, role: string | null = "viewer") {
   fake.route((_req, url) => {
     if (url.origin === ATOM_URL && url.pathname === "/auth/token") {
@@ -29,7 +29,7 @@ function routes(fake: FakeSupabase, role: string | null = "viewer") {
     return undefined;
   });
   fake.addAuthUser({ id: "user-1", email: "operator@example.com", token: TOKEN });
-  if (role) fake.seed("backoffice.bo_backoffice_users", [{ id: "bo-1", user_id: "user-1", role, is_active: true }]);
+  if (role) fake.seed("backoffice.backoffice_users", [{ id: "bo-1", user_id: "user-1", role, is_active: true }]);
 }
 
 /** A JWT-shaped token whose payload carries app_role (the signature is not checked by the function). */
@@ -106,7 +106,7 @@ Deno.test("atom: checkLocalPacks reads saved packs from backoffice and reports d
       packOfferValidityEnd: "2099-01-01 00:00:00", packOfferValidityTz: "UTC", packOfferId: "po-1", offerId: "9981",
       price: 3.99, currency: "EUR", providerName: "Provider",
     };
-    fake.seed("backoffice.bo_product_packs", [saved, { ...saved, productId: 1, packId: "other" }]);
+    fake.seed("backoffice.product_packs", [saved, { ...saved, productId: 1, packId: "other" }]);
     const res = await call({ mode: "checkLocalPacks", atom_product_id: PRODUCT }, auth);
     assertEquals(res.status, 200);
     assertEquals(res.headers.get("Cache-Control"), "no-store");
@@ -117,7 +117,7 @@ Deno.test("atom: checkLocalPacks reads saved packs from backoffice and reports d
 
     // Atom unavailable: saved packs are still returned, with a check error instead of warnings.
     atomStub.products.delete("404");
-    fake.seed("backoffice.bo_product_packs", [{ ...saved, productId: 404 }]);
+    fake.seed("backoffice.product_packs", [{ ...saved, productId: 404 }]);
     const down = await readJson(await call({ mode: "checkLocalPacks", atom_product_id: 404 }, auth));
     assertEquals([down.ok, (down.packs as unknown[]).length, (down.messages as unknown[]).length, (down.errors as unknown[]).length], [true, 1, 0, 1]);
   });

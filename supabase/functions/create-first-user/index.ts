@@ -5,9 +5,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
  * create-first-user
  *
  * Bootstrap-only edge function. Creates the first backoffice admin when
- * backoffice.bo_backoffice_users is empty (see migration 20261027120000_baseline_schema.sql).
+ * backoffice.backoffice_users is empty (see migration 20261027120000_baseline_schema.sql).
  *
- * Insert columns (bo_backoffice_users):
+ * Insert columns (backoffice_users):
  *   user_id        uuid  — auth.users.id from Auth Admin createUser
  *   email          text
  *   display_name   text
@@ -58,7 +58,7 @@ Deno.serve(async (req: Request) => {
     });
 
     const { data: existing, error: countErr } = await admin
-      .schema("backoffice").from("bo_backoffice_users")
+      .schema("backoffice").from("backoffice_users")
       .select("email, role")
       .order("created_at", { ascending: true });
 
@@ -67,7 +67,7 @@ Deno.serve(async (req: Request) => {
         {
           ok: false,
           error:
-            `Could not read bo_backoffice_users: ${countErr.message}. Run migrations first.`,
+            `Could not read backoffice_users: ${countErr.message}. Run migrations first.`,
         },
         500,
       );
@@ -138,9 +138,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Values match backoffice.bo_backoffice_users from the baseline_schema migration.
+    // Values match backoffice.backoffice_users from the baseline_schema migration.
     const { data: boUser, error: boErr } = await admin
-      .schema("backoffice").from("bo_backoffice_users")
+      .schema("backoffice").from("backoffice_users")
       .insert({
         user_id: userId,
         email,
@@ -158,7 +158,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(
         {
           ok: false,
-          error: `Auth user created but bo_backoffice_users insert failed: ${boErr.message}`,
+          error: `Auth user created but backoffice_users insert failed: ${boErr.message}`,
         },
         500,
       );

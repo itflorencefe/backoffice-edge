@@ -218,7 +218,7 @@ export function createHandler(services: Services) {
         return json({ ok: false, error: "App users are not authorized for this endpoint" }, 403);
       }
       // Atom only reads data, so active viewers are allowed as well.
-      const { data: boUser, error: roleError } = await supabaseAdmin.schema("backoffice").from("bo_backoffice_users")
+      const { data: boUser, error: roleError } = await supabaseAdmin.schema("backoffice").from("backoffice_users")
         .select("role").eq("user_id", user.id).eq("is_active", true).maybeSingle();
       if (roleError) throw new Error("Unable to verify backoffice permissions");
       if (!boUser || !["viewer", "editor", "admin"].includes(boUser.role)) {
@@ -317,7 +317,7 @@ export async function loadLocalPacks(productId: number, request: Request): Promi
     auth: { persistSession: false, autoRefreshToken: false },
     global: { headers: { Authorization: authorization } },
   });
-  const { data, error } = await supabase.schema("backoffice").from("bo_product_packs")
+  const { data, error } = await supabase.schema("backoffice").from("product_packs")
     .select("*").eq("productId", productId).order("sortOrder").order("packId");
   if (error) throw new Error(`Unable to load saved packs: ${error.message}`);
   return (data ?? []).map((row) => ({

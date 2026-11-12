@@ -5,13 +5,13 @@ Requires Bash, curl and jq, the local stack of this repo with the `atom` edge fu
 Prepare the local stack from the repository root:
 
 ```sh
-npm run local:start                                   # stack + migrations (bo_backoffice_users is in the baseline)
+npm run local:start                                   # stack + migrations (backoffice.backoffice_users exists)
 docker exec -i supabase_db_bolt-migration psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
   < atom/script/local-smoke-user.sql                  # local smoke account
 npm run local:functions                               # keep running (or npm run local:dev)
 ```
 
-`backoffice.bo_backoffice_users` already exists in the baseline migration, so no
+`backoffice.backoffice_users` already exists after the migrations, so no
 migration is needed. `local-smoke-user.sql` creates the Supabase Auth user
 `atom-smoke@example.test` with password `AtomSmoke-local-only-2026!` and an active
 `viewer` row. It can be reapplied without resetting the database; run it again
@@ -22,7 +22,7 @@ The smoke scripts log in automatically with that account only at
 `http://127.0.0.1:54321` or `http://localhost:54321`. To use another account,
 set both `SUPABASE_EMAIL` and `SUPABASE_PASSWORD`, or supply a session JWT
 in `SUPABASE_ACCESS_TOKEN` (takes precedence). Login uses Supabase Auth;
-`bo_backoffice_users` stores permissions, not passwords. The edge function
+`backoffice_users` stores permissions, not passwords. The edge function
 continues to reject anonymous callers and users without an active allowed role.
 
 Run from the repository root:

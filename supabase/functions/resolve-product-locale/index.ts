@@ -33,7 +33,7 @@ Deno.serve(async (req)=>{
     }
     const supabase = createClient(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
     // Resolve: service slug -> service -> product (by country_code) -> product_locales
-    const { data: service, error: serviceError } = await supabase.schema("backoffice").from("bo_services").select("id").eq("slug", serviceSlug).maybeSingle();
+    const { data: service, error: serviceError } = await supabase.schema("backoffice").from("services").select("id").eq("slug", serviceSlug).maybeSingle();
     if (serviceError) {
       return jsonResponse({
         ok: false,
@@ -48,7 +48,7 @@ Deno.serve(async (req)=>{
     }
     let product = null;
     let countryFallback = false;
-    const { data: exactProduct, error: productError } = await supabase.schema("backoffice").from("bo_products").select("id, slug, display_name, country_code, hostname_staging, hostname_production, status").eq("service_id", service.id).eq("country_code", countryCode.toUpperCase()).eq("status", "active").maybeSingle();
+    const { data: exactProduct, error: productError } = await supabase.schema("backoffice").from("products").select("id, slug, display_name, country_code, hostname_staging, hostname_production, status").eq("service_id", service.id).eq("country_code", countryCode.toUpperCase()).eq("status", "active").maybeSingle();
     if (productError) {
       return jsonResponse({
         ok: false,
@@ -58,7 +58,7 @@ Deno.serve(async (req)=>{
     if (exactProduct) {
       product = exactProduct;
     } else {
-      const { data: defaultProduct, error: defaultErr } = await supabase.schema("backoffice").from("bo_products").select("id, slug, display_name, country_code, hostname_staging, hostname_production, status").eq("service_id", service.id).eq("is_default", true).eq("status", "active").maybeSingle();
+      const { data: defaultProduct, error: defaultErr } = await supabase.schema("backoffice").from("products").select("id, slug, display_name, country_code, hostname_staging, hostname_production, status").eq("service_id", service.id).eq("is_default", true).eq("status", "active").maybeSingle();
       if (defaultErr) return jsonResponse({
         ok: false,
         error: defaultErr.message
@@ -73,7 +73,7 @@ Deno.serve(async (req)=>{
       countryFallback = true;
     }
     // Get all active locales for this product
-    const { data: locales, error: localesError } = await supabase.schema("backoffice").from("bo_product_locales").select("id, language_code, display_name, is_default, status, config_version_staging, config_version_production").eq("product_id", product.id).eq("status", "active").order("is_default", {
+    const { data: locales, error: localesError } = await supabase.schema("backoffice").from("product_locales").select("id, language_code, display_name, is_default, status, config_version_staging, config_version_production").eq("product_id", product.id).eq("status", "active").order("is_default", {
       ascending: false
     });
     if (localesError) {

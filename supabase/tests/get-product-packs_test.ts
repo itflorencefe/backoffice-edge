@@ -11,7 +11,7 @@ const row = {
 
 Deno.test("get-product-packs: returns the configured packs of one Atom product, in saved order", async () => {
   await withFake(async (fake) => {
-    fake.seed("backoffice.bo_product_packs", [
+    fake.seed("backoffice.product_packs", [
       { ...row, packId: "60", sortOrder: 1, price: "1.50", providerName: "hidden", packOfferId: "link" },
       { ...row, sortOrder: 0, providerName: "hidden", packValidityEnd: "2099-01-01" },
       { ...row, productId: 1, packId: "other", sortOrder: 0 },
@@ -45,7 +45,7 @@ Deno.test("get-product-packs: validation, methods and database failures", async 
     const realError = console.error;
     console.error = (...args: unknown[]) => errors.push(args);
     try {
-      fake.fail("backoffice.bo_product_packs", "GET");
+      fake.fail("backoffice.product_packs", "GET");
       const failed = await handler(get("get-product-packs", { atom_product_id: "2930" }));
       assertEquals(failed.status, 500);
       assertEquals(await readJson(failed), { ok: false, error: "Unable to load product packs." });

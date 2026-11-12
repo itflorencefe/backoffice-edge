@@ -4,8 +4,8 @@
 project_id = "bolt-migration"
 
 [api]
-# Local stack only (npm run local:start): the back office tables live in the `backoffice` schema.
-schemas = ["public", "graphql_public", "backoffice"]
+# Local stack only (npm run local:start): back office tables in `backoffice`, app tables in `application`.
+schemas = ["public", "graphql_public", "backoffice", "application"]
 extra_search_path = ["public", "extensions"]
 
 [db]
@@ -22,9 +22,6 @@ enabled = false
 verify_jwt = false
 
 [functions.static-env-proxy]
-verify_jwt = false
-
-[functions.whoami]
 verify_jwt = false
 
 [functions.gamification-proxy]

@@ -280,7 +280,7 @@ async function markFailed(
   errorMessage: string,
 ): Promise<void> {
   await supabase
-    .from("avatar_generations")
+    .schema("application").from("avatar_generations")
     .update({
       status: "failed",
       error_message: errorMessage,
@@ -406,7 +406,7 @@ async function runGeneration(opts: {
       reader,
       (responseId) => {
         void supabase
-          .from("avatar_generations")
+          .schema("application").from("avatar_generations")
           .update({
             openai_response_id: responseId,
             updated_at: new Date().toISOString(),
@@ -446,7 +446,7 @@ async function runGeneration(opts: {
       const supabaseUrl = `${publicUrlData.publicUrl}?t=${Date.now()}`;
 
       await supabase
-        .from("avatar_generations")
+        .schema("application").from("avatar_generations")
         .update({
           status: "completed",
           generated_avatar_url: supabaseUrl,
@@ -456,7 +456,7 @@ async function runGeneration(opts: {
         .eq("id", opts.generationId);
 
       await supabase
-        .from("profiles")
+        .schema("application").from("profiles")
         .update({ avatar_url: supabaseUrl, onboarding_completed: true })
         .eq("id", opts.userId);
 
@@ -576,7 +576,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   // --- Concurrency guard ---
   const { data: activeRow } = await supabase
-    .from("avatar_generations")
+    .schema("application").from("avatar_generations")
     .select("id, status, created_at")
     .eq("user_id", userId)
     .in("status", ["pending", "processing"])
@@ -618,7 +618,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (serviceId) insertPayload.service_id = serviceId;
 
   const { data: genRow, error: insertError } = await supabase
-    .from("avatar_generations")
+    .schema("application").from("avatar_generations")
     .insert(insertPayload)
     .select("id")
     .maybeSingle();
@@ -627,7 +627,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     console.error(`${TAG} ${ts} | insert failed:`, insertError?.message);
     // Race: another insert may have won — try return active row
     const { data: raced } = await supabase
-      .from("avatar_generations")
+      .schema("application").from("avatar_generations")
       .select("id, status")
       .eq("user_id", userId)
       .in("status", ["pending", "processing"])
@@ -653,7 +653,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const generationId = genRow.id as string;
 
   await supabase
-    .from("avatar_generations")
+    .schema("application").from("avatar_generations")
     .update({ status: "processing", updated_at: new Date().toISOString() })
     .eq("id", generationId);
 

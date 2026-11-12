@@ -255,7 +255,7 @@ export class FakeSupabase {
   readonly requests: RecordedRequest[] = [];
   readonly authUsers: AuthUser[] = [];
   private routes: Route[] = [];
-  /** Per-table errors returned instead of data, e.g. `fail("backoffice.bo_products", "GET")`. */
+  /** Per-table errors returned instead of data, e.g. `fail("backoffice.products", "GET")`. */
   private failures = new Map<string, string>();
 
   constructor() {
@@ -282,6 +282,28 @@ export class FakeSupabase {
   fail(table: string, method = "GET", message = "simulated failure"): this {
     this.failures.set(`${method} ${table}`, message);
     return this;
+  }
+
+  /** Columns this database does not have (e.g. the BBM schema): any request that selects, filters
+   *  or writes one of them gets PostgREST's `400 42703`, like a real missing column. */
+  private missingColumns = new Map<string, string[]>();
+
+  dropColumns(table: string, columns: string[]): this {
+    this.missingColumns.set(table, columns);
+    return this;
+  }
+
+  private missingColumnIn(key: string, params: URLSearchParams, body: unknown): string | null {
+    const cols = this.missingColumns.get(key);
+    if (!cols) return null;
+    const select = params.get("select") ?? "";
+    const rows = Array.isArray(body) ? body : body && typeof body === "object" ? [body] : [];
+    for (const col of cols) {
+      if (new RegExp(`(^|[^a-z_])${col}([^a-z_]|$)`).test(select)) return col;
+      if (params.has(col)) return col;
+      if (rows.some((r) => col in (r as Record<string, unknown>))) return col;
+    }
+    return null;
   }
 
   /** Extra handler for non-Supabase URLs (or to override a Supabase endpoint). */
@@ -321,6 +343,8 @@ export class FakeSupabase {
     const key = `${schema}.${table}`;
     const failure = this.failures.get(`${req.method} ${key}`);
     if (failure) return json({ code: "XX000", message: failure, details: null, hint: null }, 400);
+    const missing = this.missingColumnIn(key, url.searchParams, body);
+    if (missing) return json({ code: "42703", message: `column ${table}.${missing} does not exist`, details: null, hint: null }, 400);
 
     if (table.startsWith("rpc/")) throw new Error(`FakeSupabase: unexpected RPC ${table}`);
     const params = url.searchParams;

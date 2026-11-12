@@ -215,9 +215,9 @@ async function loadTranslator(
   }))];
   if (locale && keys.length > 0) {
     const [svc, loc] = await Promise.all([
-      supabase.schema("backoffice").from("bo_service_translations_defaults").select("namespace, key, value")
+      supabase.schema("backoffice").from("service_translations_defaults").select("namespace, key, value")
         .eq("service_id", serviceId).eq("environment", environment).eq("language_code", locale.language_code).in("key", keys),
-      supabase.schema("backoffice").from("bo_product_translations").select("namespace, key, value")
+      supabase.schema("backoffice").from("product_translations").select("namespace, key, value")
         .eq("product_locale_id", locale.id).eq("environment", environment).in("key", keys),
     ]);
     if (svc.error || loc.error) {
@@ -287,7 +287,7 @@ async function loadSections(
 ): Promise<{ rows: SectionRow[]; error: string | null }> {
   if (screenIds.length === 0) return { rows: [], error: null };
   const { data, error } = await db
-    .from("bo_app_screen_sections")
+    .from("app_screen_sections")
     .select("id, screen_id, platform, widget_type, title, show_title, position, col_span, config, start_at_local, end_at_local, visible_to")
     .in("screen_id", screenIds)
     .eq("enabled", true)
@@ -370,7 +370,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const db = supabase.schema("backoffice");
 
     const { data: product, error: productError } = await db
-      .from("bo_products")
+      .from("products")
       .select("id, service_id, country_code, timezone")
       .eq("id", productId)
       .maybeSingle();
@@ -381,7 +381,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!product) return fail(404, "Product not found");
 
     const { data: locales, error: localesError } = await db
-      .from("bo_product_locales")
+      .from("product_locales")
       .select("id, language_code, is_default")
       .eq("product_id", product.id)
       .eq("status", "active")
@@ -398,7 +398,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const owners = [`service_id.eq.${product.service_id}`, `product_id.eq.${product.id}`];
     if (locale) owners.push(`product_locale_id.eq.${locale.id}`);
     let query = db
-      .from("bo_app_screens")
+      .from("app_screens")
       .select("id, slug, name, enabled, service_id, product_id, product_locale_id")
       .eq("environment", environment)
       .or(owners.join(","));

@@ -317,7 +317,7 @@ Deno.serve(async (req: Request) => {
 
     // 3. Resolve language
     const { data: allLocales } = await supabase
-      .schema("backoffice").from("bo_product_locales")
+      .schema("backoffice").from("product_locales")
       .select("id, language_code, display_name, is_default, locale_override, footer_columns_staging, footer_columns_production")
       .eq("product_id", product.id)
       .eq("status", "active")
@@ -341,7 +341,7 @@ Deno.serve(async (req: Request) => {
       svcBranding, localeBranding,
       svcAssets, productAssets, localeAssets,
       svcTranslations, localeTranslations,
-      svcConfig, localeConfig,
+      svcConfig, productConfig, localeConfig,
       svcFlags, localeFlags,
       signupSettingsRow, localeLoginMethods,
       menuItemRows,
@@ -349,52 +349,54 @@ Deno.serve(async (req: Request) => {
       svcAvatar, prodAvatar, localeAvatar,
     ] = await Promise.all([
       // Branding
-      supabase.schema("backoffice").from("bo_service_branding_defaults").select("colors, gradients, fonts, radius, spacing, font_sizes, font_weights, shadows")
+      supabase.schema("backoffice").from("service_branding_defaults").select("colors, gradients, fonts, radius, spacing, font_sizes, font_weights, shadows")
         .eq("service_id", service.id).eq("environment", environment).maybeSingle(),
-      supabase.schema("backoffice").from("bo_product_branding").select("colors, gradients, fonts, radius, spacing, font_sizes, font_weights, shadows")
+      supabase.schema("backoffice").from("product_branding").select("colors, gradients, fonts, radius, spacing, font_sizes, font_weights, shadows")
         .eq("product_locale_id", locale.id).eq("environment", environment).maybeSingle(),
       // Assets
-      supabase.schema("backoffice").from("bo_service_assets_defaults").select("asset_key, url, mime_type, metadata")
+      supabase.schema("backoffice").from("service_assets_defaults").select("asset_key, url, mime_type, metadata")
         .eq("service_id", service.id).eq("environment", environment),
-      supabase.schema("backoffice").from("bo_product_level_assets").select("asset_key, url, mime_type, metadata")
+      supabase.schema("backoffice").from("product_level_assets").select("asset_key, url, mime_type, metadata")
         .eq("product_id", product.id).eq("environment", environment),
-      supabase.schema("backoffice").from("bo_product_assets").select("asset_key, url, mime_type, metadata")
+      supabase.schema("backoffice").from("product_assets").select("asset_key, url, mime_type, metadata")
         .eq("product_locale_id", locale.id).eq("environment", environment),
       // Translations
-      supabase.schema("backoffice").from("bo_service_translations_defaults").select("namespace, key, value")
+      supabase.schema("backoffice").from("service_translations_defaults").select("namespace, key, value")
         .eq("service_id", service.id).eq("environment", environment).eq("language_code", locale.language_code),
-      supabase.schema("backoffice").from("bo_product_translations").select("namespace, key, value")
+      supabase.schema("backoffice").from("product_translations").select("namespace, key, value")
         .eq("product_locale_id", locale.id).eq("environment", environment),
-      // Public Config
-      supabase.schema("backoffice").from("bo_service_public_config_defaults").select("key, value")
+      // Public Config (service → product → locale)
+      supabase.schema("backoffice").from("product_public_config").select("key, value")
         .eq("service_id", service.id).eq("environment", environment),
-      supabase.schema("backoffice").from("bo_product_public_config").select("key, value")
+      supabase.schema("backoffice").from("product_public_config").select("key, value")
+        .eq("product_id", product.id).eq("environment", environment),
+      supabase.schema("backoffice").from("product_public_config").select("key, value")
         .eq("product_locale_id", locale.id).eq("environment", environment),
       // Feature Flags
-      supabase.schema("backoffice").from("bo_service_feature_flags_defaults").select("flag_key, enabled")
+      supabase.schema("backoffice").from("service_feature_flags_defaults").select("flag_key, enabled")
         .eq("service_id", service.id).eq("environment", environment),
-      supabase.schema("backoffice").from("bo_product_feature_flags").select("flag_key, enabled")
+      supabase.schema("backoffice").from("product_feature_flags").select("flag_key, enabled")
         .eq("product_locale_id", locale.id).eq("environment", environment),
       // Signup settings + Login Methods (product-level only, no service fallback)
-      supabase.schema("backoffice").from("bo_product_signup_settings").select("enabled, signup_url")
+      supabase.schema("backoffice").from("product_signup_settings").select("enabled, signup_url")
         .eq("product_id", product.id).eq("environment", environment).maybeSingle(),
-      supabase.schema("backoffice").from("bo_product_login_methods").select("type, enabled, is_default, display_order, label_i18n_key, icon, feature_flag, min_app_version, max_app_version, config")
+      supabase.schema("backoffice").from("product_login_methods").select("type, enabled, is_default, display_order, label_i18n_key, icon, feature_flag, min_app_version, max_app_version, config")
         .eq("product_id", product.id).eq("environment", environment).order("display_order"),
       // Menu Items
-      supabase.schema("backoffice").from("bo_product_menu_items").select("id, item_key, label, url, icon, icon_url, display_order, parent_key, visible, enabled, service_id, product_id, product_locale_id, route, external_url, auth_required, label_i18n_key, feature_flag, badge_text, badge_i18n_key, badge_color, min_app_version, max_app_version, screen_slug")
+      supabase.schema("backoffice").from("product_menu_items").select("id, item_key, label, url, icon, icon_url, display_order, parent_key, visible, enabled, service_id, product_id, product_locale_id, route, external_url, auth_required, label_i18n_key, feature_flag, badge_text, badge_i18n_key, badge_color, min_app_version, max_app_version, screen_slug")
         .eq("environment", environment)
         .or(`service_id.eq.${service.id},product_id.eq.${product.id},product_locale_id.eq.${locale.id}`),
       // Footer Items
-      supabase.schema("backoffice").from("bo_service_footer_items_defaults").select("item_key, label, url, icon, display_order, item_group, visible")
+      supabase.schema("backoffice").from("service_footer_items_defaults").select("item_key, label, url, icon, display_order, item_group, visible")
         .eq("service_id", service.id).eq("environment", environment).order("display_order"),
-      supabase.schema("backoffice").from("bo_product_footer_items").select("item_key, label, url, icon, display_order, item_group, visible")
+      supabase.schema("backoffice").from("product_footer_items").select("item_key, label, url, icon, display_order, item_group, visible")
         .eq("product_locale_id", locale.id).eq("environment", environment).order("display_order"),
       // Avatar config (3-tier) — fetch all rows; active row is resolved below
-      supabase.schema("backoffice").from("bo_service_avatar_defaults").select("configuration, themes, event, valid_from, valid_to, enabled")
+      supabase.schema("backoffice").from("service_avatar_defaults").select("configuration, themes, event, valid_from, valid_to, enabled")
         .eq("service_id", service.id).eq("environment", environment).eq("enabled", true),
-      supabase.schema("backoffice").from("bo_product_avatar").select("configuration, themes, event, valid_from, valid_to, enabled")
+      supabase.schema("backoffice").from("product_avatar").select("configuration, themes, event, valid_from, valid_to, enabled")
         .eq("product_id", product.id).eq("environment", environment).eq("enabled", true),
-      supabase.schema("backoffice").from("bo_locale_avatar").select("configuration, themes, event, valid_from, valid_to, enabled")
+      supabase.schema("backoffice").from("locale_avatar").select("configuration, themes, event, valid_from, valid_to, enabled")
         .eq("product_locale_id", locale.id).eq("environment", environment).eq("enabled", true),
     ]);
 
@@ -416,7 +418,7 @@ Deno.serve(async (req: Request) => {
     // environment falls back to its staging rows; slots without an uploaded file are skipped.
     let serviceAssetRows = svcAssets.data || [];
     if (serviceAssetRows.length === 0 && environment !== "staging") {
-      const { data: stagingSvcAssets } = await supabase.schema("backoffice").from("bo_service_assets_defaults")
+      const { data: stagingSvcAssets } = await supabase.schema("backoffice").from("service_assets_defaults")
         .select("asset_key, url, mime_type, metadata").eq("service_id", service.id).eq("environment", "staging");
       serviceAssetRows = stagingSvcAssets || [];
     }
@@ -445,9 +447,12 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 8. Merge config (key-based, locale wins)
+    // 8. Merge config (key-based, service → product → locale)
     const configMap: Record<string, string> = {};
     for (const c of (svcConfig.data || [])) {
+      configMap[c.key] = c.value;
+    }
+    for (const c of (productConfig.data || [])) {
       configMap[c.key] = c.value;
     }
     for (const c of (localeConfig.data || [])) {
@@ -522,7 +527,7 @@ Deno.serve(async (req: Request) => {
     if (localeMenuItemsData.length > 0) {
       const itemIds = localeMenuItemsData.map((m: { id: string }) => m.id);
       const { data: tiersData } = await supabase
-        .schema("backoffice").from("bo_product_menu_item_tiers")
+        .schema("backoffice").from("product_menu_item_tiers")
         .select("menu_item_id, tier, visible, enabled, locked_action, route, external_url, label, label_i18n_key, badge_text, badge_i18n_key, badge_color, display_order, screen_slug")
         .in("menu_item_id", itemIds);
 
@@ -588,7 +593,7 @@ Deno.serve(async (req: Request) => {
 
     // 12b. Footer hidden pages
     const { data: footerHiddenPagesData } = await supabase
-      .schema("backoffice").from("bo_product_footer_hidden_pages")
+      .schema("backoffice").from("product_footer_hidden_pages")
       .select("page_path")
       .eq("product_locale_id", locale.id)
       .eq("environment", environment);
@@ -599,7 +604,7 @@ Deno.serve(async (req: Request) => {
     // For each path the most specific level wins; a winning row with
     // enabled = false hides the path entirely (disables the inherited rule).
     const { data: pageBehaviourRaw } = await supabase
-      .schema("backoffice").from("bo_page_behaviour_rules")
+      .schema("backoffice").from("page_behaviour_rules")
       .select("id, path, label, position, enabled, service_id, product_id, product_locale_id")
       .eq("environment", environment)
       .or(`service_id.eq.${service.id},product_id.eq.${product.id},product_locale_id.eq.${locale.id}`);
@@ -617,8 +622,8 @@ Deno.serve(async (req: Request) => {
 
     // 14. Documents
     const { data: documentsData } = await supabase
-      .schema("backoffice").from("bo_product_documents")
-      .select("slug, path, title, updated_at, current_version:bo_product_document_versions!bo_fk_product_documents_current_version(version)")
+      .schema("backoffice").from("product_documents")
+      .select("slug, path, title, updated_at, current_version:product_document_versions!bo_fk_product_documents_current_version(version)")
       .eq("product_id", product.id)
       .eq("locale", locale.language_code)
       .eq("environment", environment)
@@ -637,7 +642,7 @@ Deno.serve(async (req: Request) => {
     if (pageBehaviourRules && pageBehaviourRules.length > 0) {
       const ruleIds = pageBehaviourRules.map((r: { id: string }) => r.id);
       const { data: tierRules } = await supabase
-        .schema("backoffice").from("bo_page_behaviour_tier_rules")
+        .schema("backoffice").from("page_behaviour_tier_rules")
         .select("rule_id, tier, action, redirect_url, screen_slug")
         .in("rule_id", ruleIds);
 
@@ -673,7 +678,7 @@ Deno.serve(async (req: Request) => {
     //   - `content_consumption` (legacy, frozen): { [type]: { [tier]: action } }
     //   - `consumption_rules` (new): { [type]: { [tier]: { action, rate_limit } } }
     const { data: consumptionRows } = await supabase
-      .schema("backoffice").from("bo_product_content_consumption_rules")
+      .schema("backoffice").from("product_content_consumption_rules")
       .select("content_type, tier, action, rate_limit_enabled, tries_limit, frequency_period, frequency_unit_count, on_limit_reached_action")
       .eq("product_id", product.id)
       .eq("environment", environment);
@@ -710,7 +715,7 @@ Deno.serve(async (req: Request) => {
 
     // 16. Unsubscribe method
     const { data: unsubRow } = await supabase
-      .schema("backoffice").from("bo_product_unsubscribe_methods")
+      .schema("backoffice").from("product_unsubscribe_methods")
       .select("method, confirm_unsubscription, permanent_delete_after_unsub, external_url, external_link_target, config")
       .eq("product_id", product.id)
       .eq("environment", environment)

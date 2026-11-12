@@ -11,14 +11,14 @@ Deno.test("create-first-user: OPTIONS and method checks", async () => {
   assertEquals(getRes.status, 405);
 });
 
-Deno.test("create-first-user: creates the first admin in Auth and bo_backoffice_users", async () => {
+Deno.test("create-first-user: creates the first admin in Auth and backoffice_users", async () => {
   await withFake(async (fake) => {
     const res = await handler(post("create-first-user", { email: " Admin@Example.com ", password: "secret123", display_name: "Ada" }));
     assertEquals(res.status, 200);
     const body = await readJson(res);
     assertEquals(body.ok, true);
     assertEquals(fake.authUsers.map((u) => u.email), ["admin@example.com"]);
-    const [row] = fake.rows("backoffice.bo_backoffice_users");
+    const [row] = fake.rows("backoffice.backoffice_users");
     assertEquals(
       { user_id: row.user_id, email: row.email, display_name: row.display_name, role: row.role, is_active: row.is_active },
       { user_id: fake.authUsers[0].id, email: "admin@example.com", display_name: "Ada", role: "admin", is_active: true },
@@ -30,17 +30,17 @@ Deno.test("create-first-user: creates the first admin in Auth and bo_backoffice_
 Deno.test("create-first-user: display name falls back to first_name, then the email local part", async () => {
   await withFake(async (fake) => {
     await handler(post("create-first-user", { email: "a@b.co", password: "x", data: { first_name: "Bob" } }));
-    assertEquals(fake.rows("backoffice.bo_backoffice_users")[0].display_name, "Bob");
+    assertEquals(fake.rows("backoffice.backoffice_users")[0].display_name, "Bob");
   });
   await withFake(async (fake) => {
     await handler(post("create-first-user", { email: "carol@b.co", password: "x" }));
-    assertEquals(fake.rows("backoffice.bo_backoffice_users")[0].display_name, "carol");
+    assertEquals(fake.rows("backoffice.backoffice_users")[0].display_name, "carol");
   });
 });
 
 Deno.test("create-first-user: an existing user blocks the bootstrap and names the oldest admin", async () => {
   await withFake(async (fake) => {
-    fake.seed("backoffice.bo_backoffice_users", [
+    fake.seed("backoffice.backoffice_users", [
       { id: "1", user_id: "u1", email: "editor@example.com", role: "editor", created_at: "2026-01-01" },
       { id: "2", user_id: "u2", email: "late-admin@example.com", role: "admin", created_at: "2026-03-01" },
       { id: "3", user_id: "u3", email: "first-admin@example.com", role: "admin", created_at: "2026-02-01" },
@@ -57,7 +57,7 @@ Deno.test("create-first-user: an existing user blocks the bootstrap and names th
 
 Deno.test("create-first-user: without admins the oldest user is reported", async () => {
   await withFake(async (fake) => {
-    fake.seed("backoffice.bo_backoffice_users", [
+    fake.seed("backoffice.backoffice_users", [
       { id: "1", user_id: "u1", email: "viewer@example.com", role: "viewer", created_at: "2026-01-01" },
     ]);
     const body = await readJson(await handler(post("create-first-user", undefined)));
@@ -88,7 +88,7 @@ Deno.test("create-first-user: Auth errors are returned as 400", async () => {
 
 Deno.test("create-first-user: a failed backoffice insert deletes the Auth user again", async () => {
   await withFake(async (fake) => {
-    fake.fail("backoffice.bo_backoffice_users", "POST", "insert refused");
+    fake.fail("backoffice.backoffice_users", "POST", "insert refused");
     const res = await handler(post("create-first-user", { email: "a@b.co", password: "secret" }));
     assertEquals(res.status, 500);
     assertMatch(String((await readJson(res)).error), /insert refused/);
@@ -96,9 +96,9 @@ Deno.test("create-first-user: a failed backoffice insert deletes the Auth user a
   });
 });
 
-Deno.test("create-first-user: unreadable bo_backoffice_users asks to run migrations", async () => {
+Deno.test("create-first-user: unreadable backoffice_users asks to run migrations", async () => {
   await withFake(async (fake) => {
-    fake.fail("backoffice.bo_backoffice_users", "GET", "relation does not exist");
+    fake.fail("backoffice.backoffice_users", "GET", "relation does not exist");
     const res = await handler(post("create-first-user", { email: "a@b.co", password: "secret" }));
     assertEquals(res.status, 500);
     assertMatch(String((await readJson(res)).error), /Run migrations first/);
