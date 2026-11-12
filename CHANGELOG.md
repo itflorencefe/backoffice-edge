@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.0](https://github.com/itflorencefe/backoffice-edge/compare/1.1.0...1.2.0) (2026-11-12)
+
+### Features
+
+* align the schema ith the bbm ([986e60b](https://github.com/itflorencefe/backoffice-edge/commit/986e60bda143a8476c21e4b9a1b18a878591978a))
+
 ## [1.1.0](https://github.com/itflorencefe/backoffice-edge/compare/1.0.0...1.1.0) (2026-11-11)
 
 ### Features
